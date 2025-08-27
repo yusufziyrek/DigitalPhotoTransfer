@@ -16,6 +16,10 @@ import javax.imageio.ImageIO;
 import java.util.Properties;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
+import java.time.LocalTime;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import javax.swing.Timer;
 
 public class PhotoViewerServer {
     public static void main(String[] args) {
@@ -42,9 +46,9 @@ public class PhotoViewerServer {
         });
 
         // Config dosyası ve otomatik/manuel tercihlerin yönetimi
-        File appDir = getAppDirectory();
-        if (appDir == null) appDir = new File(System.getProperty("user.dir"));
-        File configFile = new File(appDir, "photoviewer.properties");
+    File appDir = getAppDirectory();
+    if (appDir == null) appDir = new File(System.getProperty("user.dir"));
+    File configFile = getConfigFile();
 
         BufferedImage defaultImage = null;
 
@@ -311,9 +315,43 @@ public class PhotoViewerServer {
     }
 
     public static void saveProperties(File configFile, Properties p) {
-        try (FileOutputStream fos = new FileOutputStream(configFile)) {
-            p.store(fos, "PhotoViewer settings");
+        try {
+            File parent = configFile.getAbsoluteFile().getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            try (FileOutputStream fos = new FileOutputStream(configFile)) {
+                p.store(fos, "PhotoViewer settings");
+            }
         } catch (IOException ignored) {}
+    }
+
+    /**
+     * Determine a writable location for photoviewer.properties.
+     * Prefer the application directory when writable, otherwise fall back to %APPDATA%/PhotoViewer
+     * or the user's home directory.
+     */
+    public static File getConfigFile() {
+        File appDir = getAppDirectory();
+        File candidate = appDir != null ? appDir : new File(System.getProperty("user.dir"));
+        // Ensure directory exists
+        try {
+            candidate.mkdirs();
+            // Try to write a tiny probe file to check writability
+            File probe = new File(candidate, ".pv_write_test");
+            try (FileOutputStream fos = new FileOutputStream(probe)) {
+                fos.write(0);
+            }
+            probe.delete();
+        } catch (Exception e) {
+            // fallback to APPDATA
+            String appdata = System.getenv("APPDATA");
+            if (appdata != null && !appdata.isEmpty()) {
+                candidate = new File(appdata, "PhotoViewer");
+            } else {
+                candidate = new File(System.getProperty("user.home"), ".photoviewer");
+            }
+            candidate.mkdirs();
+        }
+        return new File(candidate, "photoviewer.properties");
     }
 
     // Recursively scan a folder for an image file (jpg/jpeg/png/bmp) and return the first readable image.
@@ -366,16 +404,18 @@ public class PhotoViewerServer {
         accessory.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         JButton helpBtn = new JButton("Yardım / Hakkında");
         helpBtn.setToolTipText("Lisans bilgisi ve kısa kullanım yardımı");
-        helpBtn.addActionListener(ev -> {
-            String license = "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
-                    "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
-                    "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek\n\n" +
-                    "Kısa yardım:\n" +
-                    "- Fotoğraf seçmek için dosya seçiciden bir resim seçin (jpg, jpeg, png, bmp).\n" +
-                    "- Tam ekrandayken sağ tık ile çıkış yapabilir veya ESC ile çıkabilirsiniz. \n" +
-                    "İletişim: yusufziyrek1@gmail.com"
-                    ;
-            JOptionPane.showMessageDialog(frame, license, "Yardım / Lisans", JOptionPane.INFORMATION_MESSAGE);
+        helpBtn.addActionListener(new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent ev) {
+                String license = "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
+                        "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
+                        "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek\n\n" +
+                        "Kısa yardım:\n" +
+                        "- Fotoğraf seçmek için dosya seçiciden bir resim seçin (jpg, jpeg, png, bmp).\n" +
+                        "- Tam ekrandayken sağ tık ile çıkış yapabilir veya ESC ile çıkabilirsiniz. \n" +
+                        "İletişim: yusufziyrek1@gmail.com";
+                JOptionPane.showMessageDialog(frame, license, "Yardım / Lisans", JOptionPane.INFORMATION_MESSAGE);
+            }
         });
         accessory.add(helpBtn, BorderLayout.NORTH);
         fileChooser.setAccessory(accessory);
@@ -391,6 +431,17 @@ class PhotoPanel extends JPanel {
     private BufferedImage image = null;
     private String info = "Wyndham Grand Istanbul Europe";
     private JFrame parentFrame;
+
+    // Clock & date overlay
+    private volatile String timeText = "";
+    private volatile String dateText = "";
+    private final DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
+    private final DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    // Bigger, clearer fonts: large for time, smaller for date (increased per user request)
+    private final Font timeFont = new Font("SansSerif", Font.BOLD, 60);
+    private final Font dateFont = new Font("SansSerif", Font.PLAIN, 20);
+    private final Timer clockTimer;
+    private boolean showClock = true; // can add setter if needed
 
     public void setImage(BufferedImage img) {
         this.image = img;
@@ -417,31 +468,32 @@ class PhotoPanel extends JPanel {
     {
         // Manuel seçim menü öğesi
         JMenuItem manualItem = new JMenuItem("Manuel Seç");
-        manualItem.addActionListener(ev -> {
-            if (parentFrame == null) return;
-            JFileChooser fc = PhotoViewerServer.createImageFileChooser(parentFrame);
-            int r = fc.showOpenDialog(parentFrame);
-            if (r == JFileChooser.APPROVE_OPTION) {
-                File sel = fc.getSelectedFile();
-                try {
-                    BufferedImage img = ImageIO.read(sel);
-                    if (img != null) {
-                        setImage(img);
-                        // Kaydet: photoviewer.properties içine mode=MANUAL ve savedImagePath yaz
-                        try {
-                            File appDir = PhotoViewerServer.getAppDirectory();
-                            if (appDir == null) appDir = new File(System.getProperty("user.dir"));
-                            File configFile = new File(appDir, "photoviewer.properties");
-                            Properties p = PhotoViewerServer.loadProperties(configFile);
-                            p.setProperty("mode", "MANUAL");
-                            p.setProperty("savedImagePath", sel.getAbsolutePath());
-                            PhotoViewerServer.saveProperties(configFile, p);
-                        } catch (Exception ignore) {}
-                    } else {
-                        JOptionPane.showMessageDialog(parentFrame, "Resim yüklenemedi.", "Hata", JOptionPane.ERROR_MESSAGE);
+        manualItem.addActionListener(new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent ev) {
+                if (parentFrame == null) return;
+                JFileChooser fc = PhotoViewerServer.createImageFileChooser(parentFrame);
+                int r = fc.showOpenDialog(parentFrame);
+                if (r == JFileChooser.APPROVE_OPTION) {
+                    File sel = fc.getSelectedFile();
+                    try {
+                        BufferedImage img = ImageIO.read(sel);
+                        if (img != null) {
+                            setImage(img);
+                            // Kaydet: photoviewer.properties içine mode=MANUAL ve savedImagePath yaz
+                            try {
+                                File configFile = PhotoViewerServer.getConfigFile();
+                                Properties p = PhotoViewerServer.loadProperties(configFile);
+                                p.setProperty("mode", "MANUAL");
+                                p.setProperty("savedImagePath", sel.getAbsolutePath());
+                                PhotoViewerServer.saveProperties(configFile, p);
+                            } catch (Exception ignore) {}
+                        } else {
+                            JOptionPane.showMessageDialog(parentFrame, "Resim yüklenemedi.", "Hata", JOptionPane.ERROR_MESSAGE);
+                        }
+                    } catch (IOException ex) {
+                        JOptionPane.showMessageDialog(parentFrame, "Resim yüklenirken hata: " + ex.getMessage(), "Hata", JOptionPane.ERROR_MESSAGE);
                     }
-                } catch (IOException ex) {
-                    JOptionPane.showMessageDialog(parentFrame, "Resim yüklenirken hata: " + ex.getMessage(), "Hata", JOptionPane.ERROR_MESSAGE);
                 }
             }
         });
@@ -465,6 +517,30 @@ class PhotoPanel extends JPanel {
                 }
             }
         });
+
+        // Başlangıçta saat & tarih metinlerini güncelle ve timer başlat
+        updateTimeText();
+        clockTimer = new Timer(1000, new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent ev) {
+                updateTimeText();
+                // Her saniye güncelliyoruz (dakika değişiminde de repaint yeterli olur)
+                repaint();
+            }
+        });
+        clockTimer.setCoalesce(true);
+        clockTimer.start();
+    }
+
+    private void updateTimeText() {
+        try {
+            LocalTime lt = LocalTime.now();
+            timeText = lt.format(timeFmt);
+            dateText = LocalDate.now().format(dateFmt);
+        } catch (Exception e) {
+            timeText = "";
+            dateText = "";
+        }
     }
 
     @Override
@@ -473,6 +549,7 @@ class PhotoPanel extends JPanel {
         if (image != null) {
             Graphics2D g2d = (Graphics2D) g;
             g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             int imgWidth = image.getWidth();
             int imgHeight = image.getHeight();
             double panelRatio = (double) getWidth() / getHeight();
@@ -488,6 +565,41 @@ class PhotoPanel extends JPanel {
             int x = (getWidth() - drawWidth) / 2;
             int y = (getHeight() - drawHeight) / 2;
             g2d.drawImage(image, x, y, drawWidth, drawHeight, null);
+
+            // Saat + tarih bindirmesini sağ üst köşeye çiz
+            if (showClock && timeText != null && !timeText.isEmpty()) {
+                int margin = 18; // köşeden uzaklık
+
+                // Time
+                g2d.setFont(timeFont);
+                g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                FontMetrics fmTime = g2d.getFontMetrics();
+                int timeW = fmTime.stringWidth(timeText);
+                int timeH = fmTime.getAscent();
+
+                // Date (smaller)
+                g2d.setFont(dateFont);
+                FontMetrics fmDate = g2d.getFontMetrics();
+                int dateW = fmDate.stringWidth(dateText);
+                int dateH = fmDate.getAscent();
+
+                // Position time at right margin, then center date under time
+                int txTime = getWidth() - timeW - margin;
+                int tyTime = margin + timeH;
+                int centerX = txTime + timeW / 2;
+                int txDate = (int) Math.round(centerX - dateW / 2.0);
+                if (txDate < margin) txDate = margin; // don't go beyond left margin
+                int tyDate = tyTime + 6 + dateH; // small gap between lines
+
+                // Draw main text in blue (no shadow)
+                Color mainBlue = new Color(30, 144, 255); // DodgerBlue
+                g2d.setColor(mainBlue);
+                g2d.setFont(timeFont);
+                g2d.drawString(timeText, txTime, tyTime);
+                g2d.setFont(dateFont);
+                g2d.drawString(dateText, txDate, tyDate);
+            }
+
         } else {
             setBackground(new Color(230, 230, 230));
             g.setColor(Color.DARK_GRAY);
