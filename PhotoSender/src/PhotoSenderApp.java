@@ -6,8 +6,15 @@
 import javax.swing.*;
 import java.awt.*;
 import java.io.*;
+import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.file.Files;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class PhotoSenderApp extends JFrame {
     private static final String VERSION = "1.0.0"; // Versiyon bilgisi eklendi
@@ -224,34 +231,198 @@ public class PhotoSenderApp extends JFrame {
     }
 
     private void sendPhotoToIps(File photo, List<IpList.IpEntry> entries) {
-        for (IpList.IpEntry entry : entries) {
-            String ip = entry.getIp();
-            String name = entry.getName();
-            System.out.println("Bağlantı kuruluyor: " + ip);
-            try (Socket socket = new Socket(ip, 5000);
-                 OutputStream os = socket.getOutputStream();
-                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os));
-                 FileInputStream fis = new FileInputStream(photo)) {
-                System.out.println("Komut gönderiliyor: SEND_PHOTO");
-                // Komut satırı gönder
-                writer.write("SEND_PHOTO\n");
-                writer.flush();
-                System.out.println("Fotoğraf gönderimi başlıyor: " + photo.getName());
-                // Fotoğrafı gönder
-                byte[] buffer = new byte[4096];
-                int bytesRead;
-                while ((bytesRead = fis.read(buffer)) != -1) {
-                    os.write(buffer, 0, bytesRead);
-                }
-                os.flush();
-                socket.shutdownOutput();
-                System.out.println("Fotoğraf gönderimi tamamlandı: " + ip);
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(this, "Gönderim hatası: " + name + " (" + ip + ")\n" + ex.getMessage());
-                System.out.println("Gönderim hatası: " + name + " (" + ip + ")\n" + ex.getMessage());
-            }
+        // Quick checks
+        if (entries == null || entries.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Gönderecek IP yok.");
+            return;
         }
-        JOptionPane.showMessageDialog(this, "Fotoğraf gönderildi.");
+
+        // Disable UI while sending
+        addIpButton.setEnabled(false);
+        selectPhotoButton.setEnabled(false);
+        sendAllButton.setEnabled(false);
+        sendSingleButton.setEnabled(false);
+
+        final int CONNECT_TIMEOUT_MS = 5000;
+        final int READ_TIMEOUT_MS = 10000;
+        final int MAX_RETRIES = 2;
+        final int BUFFER_SIZE = 8 * 1024;
+        final long READ_ONCE_THRESHOLD = 20L * 1024 * 1024; // 20 MB
+
+    // Progress dialog (create first so worker can reference it)
+    final JDialog progressDialog = new JDialog(this, "Gönderiliyor...", true);
+    final JProgressBar progressBar = new JProgressBar(0, 100);
+    progressBar.setStringPainted(true);
+    progressDialog.setLayout(new BorderLayout());
+    progressDialog.add(new JLabel("Lütfen bekleyin..."), BorderLayout.NORTH);
+    progressDialog.add(progressBar, BorderLayout.CENTER);
+    JPanel p = new JPanel();
+    progressDialog.add(p, BorderLayout.SOUTH);
+    progressDialog.setSize(350, 120);
+    progressDialog.setLocationRelativeTo(this);
+
+    // Holder so cancel button can reference the worker (avoids final capture issues)
+    final SwingWorker<?, ?>[] workerHolder = new SwingWorker[1];
+
+    // holders for photo bytes and mode so worker lambda can access/mutate them
+    final java.util.concurrent.atomic.AtomicReference<byte[]> photoBytesRef = new java.util.concurrent.atomic.AtomicReference<>();
+    final java.util.concurrent.atomic.AtomicBoolean useByteArrayRef = new java.util.concurrent.atomic.AtomicBoolean(photo.length() <= READ_ONCE_THRESHOLD);
+
+    SwingWorker<Void, Integer> worker = new SwingWorker<Void, Integer>() {
+            private final List<String> failures = Collections.synchronizedList(new ArrayList<>());
+
+            @Override
+            protected Void doInBackground() throws Exception {
+                // attempt to preload photo into memory if small enough
+                if (useByteArrayRef.get()) {
+                    try {
+                        photoBytesRef.set(Files.readAllBytes(photo.toPath()));
+                    } catch (OutOfMemoryError | IOException e) {
+                        // fallback to streaming per-target
+                        photoBytesRef.set(null);
+                        useByteArrayRef.set(false);
+                        System.out.println("Fotoğraf belleğe yüklenemedi, akışla gönderilecek: " + e.getMessage());
+                    }
+                }
+
+                int total = entries.size();
+                int poolSize = Math.min(total, Math.max(2, Runtime.getRuntime().availableProcessors() * 2));
+                ExecutorService pool = Executors.newFixedThreadPool(poolSize);
+                CountDownLatch latch = new CountDownLatch(total);
+                AtomicInteger completed = new AtomicInteger(0);
+
+                for (IpList.IpEntry entry : entries) {
+                    pool.submit(() -> {
+                        String ip = entry.getIp();
+                        String name = entry.getName();
+                        boolean success = false;
+                        for (int attempt = 1; attempt <= MAX_RETRIES + 1 && !success; attempt++) {
+                            Socket socket = null;
+                            try {
+                                socket = new Socket();
+                                socket.connect(new InetSocketAddress(ip, 5000), CONNECT_TIMEOUT_MS);
+                                socket.setSoTimeout(READ_TIMEOUT_MS);
+                                OutputStream os = socket.getOutputStream();
+                                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os));
+                                long lengthToSend = (photoBytesRef.get() != null) ? photoBytesRef.get().length : photo.length();
+                                // Send header with length so receiver can read exact bytes
+                                writer.write("SEND_PHOTO:" + lengthToSend + "\n");
+                                writer.flush();
+
+                                if (useByteArrayRef.get() && photoBytesRef.get() != null) {
+                                    os.write(photoBytesRef.get());
+                                } else {
+                                    try (FileInputStream fis = new FileInputStream(photo)) {
+                                        byte[] buffer = new byte[BUFFER_SIZE];
+                                        int r;
+                                        while ((r = fis.read(buffer)) != -1) {
+                                            os.write(buffer, 0, r);
+                                        }
+                                    }
+                                }
+                                os.flush();
+                                try { socket.shutdownOutput(); } catch (IOException ignored) {}
+                                // Wait for ACK from receiver
+                                String ack = null;
+                                try {
+                                    socket.setSoTimeout(15000); // 15s ack timeout
+                                    BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), "US-ASCII"));
+                                    ack = br.readLine();
+                                } catch (SocketTimeoutException ste) {
+                                    System.out.println("ACK zaman aşımı: " + ip + " -> " + ste.getMessage());
+                                } catch (IOException ioe) {
+                                    System.out.println("ACK okuma hatası: " + ip + " -> " + ioe.getMessage());
+                                }
+                                if ("OK".equals(ack)) {
+                                    success = true;
+                                    System.out.println("Gönderildi ve onaylandı: " + name + " (" + ip + ")");
+                                } else {
+                                    System.out.println("Gönderildi fakat onay alınamadı: " + name + " (" + ip + ") ack=" + ack);
+                                }
+                            } catch (SocketTimeoutException ste) {
+                                System.out.println("Zaman aşımı: " + ip + " -> " + ste.getMessage());
+                            } catch (IOException ioe) {
+                                System.out.println("IO hatası: " + ip + " -> " + ioe.getMessage());
+                            } catch (Exception ex) {
+                                System.out.println("Genel hata: " + ip + " -> " + ex.getMessage());
+                            } finally {
+                                if (socket != null) {
+                                    try { socket.close(); } catch (IOException ignored) {}
+                                }
+                            }
+
+                            if (!success) {
+                                // exponential backoff
+                                try { Thread.sleep(500L * attempt); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                            }
+                        }
+
+                        if (!success) {
+                            failures.add(name + " (" + ip + ")");
+                        }
+
+                        int done = completed.incrementAndGet();
+                        publish((int) ((done / (double) total) * 100));
+                        latch.countDown();
+                    });
+                }
+
+                pool.shutdown();
+                // Wait for all tasks or timeout
+                try {
+                    if (!latch.await(5, TimeUnit.MINUTES)) {
+                        pool.shutdownNow();
+                        failures.add("Zaman aşımı: Gönderim tamamlanamadı (süre aşıldı)");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    failures.add("Gönderim iptal edildi.");
+                }
+
+                return null;
+            }
+
+            @Override
+            protected void process(List<Integer> chunks) {
+                int last = chunks.get(chunks.size() - 1);
+                progressBar.setValue(last);
+            }
+
+            @Override
+            protected void done() {
+                addIpButton.setEnabled(true);
+                selectPhotoButton.setEnabled(true);
+                sendAllButton.setEnabled(true);
+                sendSingleButton.setEnabled(true);
+                progressDialog.setVisible(false);
+                progressDialog.dispose();
+
+                if (failures.isEmpty()) {
+                    JOptionPane.showMessageDialog(PhotoSenderApp.this, "Fotoğraf gönderildi.");
+                } else {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("Bazı hedeflere gönderilemedi:\n");
+                    for (String f : failures) sb.append("- ").append(f).append("\n");
+                    JOptionPane.showMessageDialog(PhotoSenderApp.this, sb.toString(), "Gönderim Hataları", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        };
+
+        // Cancel button that cancels the worker
+        JButton cancelBtn = new JButton("İptal");
+        cancelBtn.addActionListener(new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                SwingWorker<?, ?> wk = workerHolder[0];
+                if (wk != null) wk.cancel(true);
+            }
+        });
+        p.add(cancelBtn);
+
+        // Start worker and show dialog
+        workerHolder[0] = worker;
+        worker.execute();
+        progressDialog.setVisible(true);
     }
 
     public static void main(String[] args) {
