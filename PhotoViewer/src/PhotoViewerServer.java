@@ -40,7 +40,7 @@ public class PhotoViewerServer {
         // Default fotoğraf seçimi
         BufferedImage defaultImage = null;
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Default fotoğrafı seçin");
+        fileChooser.setDialogTitle("Photo Viewer - Wyndham Grand Istanbul Europe");
         // Sadece fotoğraf uzantılarını gösteren filtre
         fileChooser.setAcceptAllFileFilterUsed(false);
         fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileFilter() {
@@ -55,6 +55,24 @@ public class PhotoViewerServer {
                 return "Resim Dosyaları (*.jpg, *.jpeg, *.png, *.bmp)";
             }
         });
+
+        // Yardım/Hakkında/Lisans bilgisi için accessory panel eklendi
+        JPanel accessory = new JPanel(new BorderLayout());
+        accessory.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        JButton helpBtn = new JButton("Yardım / Hakkında");
+        helpBtn.setToolTipText("Lisans bilgisi ve kısa kullanım yardımı");
+        helpBtn.addActionListener(ev -> {
+            String license = "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
+                    "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
+                    "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek\n\n" +
+                    "Kısa yardım:\n" +
+                    "- Fotoğraf seçmek için dosya seçiciden bir resim seçin (jpg, jpeg, png, bmp).\n" +
+                    "- Tam ekrandayken sağ tık ile çıkış yapabilir veya ESC ile çıkabilirsiniz.";
+            JOptionPane.showMessageDialog(frame, license, "Yardım / Lisans", JOptionPane.INFORMATION_MESSAGE);
+        });
+        accessory.add(helpBtn, BorderLayout.NORTH);
+        fileChooser.setAccessory(accessory);
+
         int result = fileChooser.showOpenDialog(frame);
         if (result == JFileChooser.APPROVE_OPTION) {
             File selectedFile = fileChooser.getSelectedFile();
