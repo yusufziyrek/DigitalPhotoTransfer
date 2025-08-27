@@ -13,6 +13,9 @@ import java.io.PushbackInputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import javax.imageio.ImageIO;
+import java.util.Properties;
+import java.net.URISyntaxException;
+import java.nio.file.Path;
 
 public class PhotoViewerServer {
     public static void main(String[] args) {
@@ -38,52 +41,88 @@ public class PhotoViewerServer {
             }
         });
 
-        // Default fotoğraf seçimi
+        // Config dosyası ve otomatik/manuel tercihlerin yönetimi
+        File appDir = getAppDirectory();
+        if (appDir == null) appDir = new File(System.getProperty("user.dir"));
+        File configFile = new File(appDir, "photoviewer.properties");
+
         BufferedImage defaultImage = null;
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Photo Viewer - Wyndham Grand Istanbul Europe");
-        // Sadece fotoğraf uzantılarını gösteren filtre
-        fileChooser.setAcceptAllFileFilterUsed(false);
-        fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileFilter() {
-            @Override
-            public boolean accept(File f) {
-                if (f.isDirectory()) return true;
-                String name = f.getName().toLowerCase();
-                return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp");
-            }
-            @Override
-            public String getDescription() {
-                return "Resim Dosyaları (*.jpg, *.jpeg, *.png, *.bmp)";
-            }
-        });
 
-        // Yardım/Hakkında/Lisans bilgisi için accessory panel eklendi
-        JPanel accessory = new JPanel(new BorderLayout());
-        accessory.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        JButton helpBtn = new JButton("Yardım / Hakkında");
-        helpBtn.setToolTipText("Lisans bilgisi ve kısa kullanım yardımı");
-        helpBtn.addActionListener(new java.awt.event.ActionListener() {
-            @Override
-            public void actionPerformed(java.awt.event.ActionEvent ev) {
-                String license = "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
-                        "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
-                        "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek\n\n" +
-                        "Kısa yardım:\n" +
-                        "- Fotoğraf seçmek için dosya seçiciden bir resim seçin (jpg, jpeg, png, bmp).\n" +
-                        "- Tam ekrandayken sağ tık ile çıkış yapabilir veya ESC ile çıkabilirsiniz.";
-                JOptionPane.showMessageDialog(frame, license, "Yardım / Lisans", JOptionPane.INFORMATION_MESSAGE);
-            }
-        });
-        accessory.add(helpBtn, BorderLayout.NORTH);
-        fileChooser.setAccessory(accessory);
+        Properties props = loadProperties(configFile);
 
-        int result = fileChooser.showOpenDialog(frame);
-        if (result == JFileChooser.APPROVE_OPTION) {
-            File selectedFile = fileChooser.getSelectedFile();
-            String name = selectedFile.getName().toLowerCase();
-            if (!(name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp"))) {
-                photoPanel.setInfo("Geçersiz dosya uzantısı. Sadece jpg, jpeg, png, bmp seçebilirsiniz.");
-            } else {
+        String mode = props.getProperty("mode", "PROMPT"); // PROMPT, MANUAL, AUTO
+        String savedImagePath = props.getProperty("savedImagePath", "");
+        String autoFolder = props.getProperty("autoFolder", "");
+
+    // If there is no config (first run), ask user once at first start and save it.
+    if (!configFile.exists()) {
+            JFileChooser fc = createImageFileChooser(frame);
+            int r = fc.showOpenDialog(frame);
+            if (r == JFileChooser.APPROVE_OPTION) {
+                File sel = fc.getSelectedFile();
+                try {
+                    BufferedImage img = ImageIO.read(sel);
+                    if (img != null) {
+                        defaultImage = img;
+                        props.setProperty("mode", "MANUAL");
+                        props.setProperty("savedImagePath", sel.getAbsolutePath());
+                        saveProperties(configFile, props);
+                    } else {
+                        // leave defaultImage null and continue with existing flow
+                    }
+                } catch (IOException ignored) {
+                }
+            }
+            // reload savedImagePath in case it was written
+            savedImagePath = props.getProperty("savedImagePath", "");
+            mode = props.getProperty("mode", mode);
+        }
+
+        // Eğer kaydedilmiş manuel resim yolu varsa yüklemeyi dene
+        if ("MANUAL".equalsIgnoreCase(mode) && !savedImagePath.isEmpty()) {
+            File f = new File(savedImagePath);
+            if (f.exists()) {
+                try { defaultImage = ImageIO.read(f); } catch (IOException ignored) {}
+            }
+        }
+
+        // Eğer AUTO mod ise tarama yap
+        if (defaultImage == null && "AUTO".equalsIgnoreCase(mode)) {
+            File folderToScan = autoFolder.isEmpty() ? appDir : new File(autoFolder);
+            System.out.println("AUTO scan: primary -> " + folderToScan.getAbsolutePath());
+            defaultImage = scanForDefaultImage(folderToScan);
+            // Eğer bulunamadıysa çalışma dizinini (IDE'de genellikle proje kökü) de tara
+            if (defaultImage == null) {
+                File workDir = new File(System.getProperty("user.dir"));
+                if (!workDir.equals(folderToScan)) {
+                    System.out.println("AUTO scan: fallback working dir -> " + workDir.getAbsolutePath());
+                    defaultImage = scanForDefaultImage(workDir);
+                }
+            }
+            // Hala yoksa son bir deneme olarak appDir'i tara (jar çalıştırılırken farklı olabilir)
+            if (defaultImage == null && appDir != null && !appDir.equals(folderToScan)) {
+                System.out.println("AUTO scan: final fallback appDir -> " + appDir.getAbsolutePath());
+                defaultImage = scanForDefaultImage(appDir);
+            }
+        }
+
+        // PROMPT: do not force repeated chooser; if still no default, show info
+        if (defaultImage == null && "PROMPT".equalsIgnoreCase(mode)) {
+            photoPanel.setInfo("Wyndham Grand Istanbul Europe");
+        }
+
+        // Eğer halen defaultImage null ise, file chooser fallback veya bilgi göster
+        if (defaultImage == null && !"MANUAL".equalsIgnoreCase(mode)) {
+            // otomatik modda bulunamadıysa fallback bilgi
+            photoPanel.setInfo("Wyndham Grand Istanbul Europe");
+        } else if (defaultImage != null) {
+            photoPanel.setImage(defaultImage);
+        } else {
+            // MANUAL modu ama kaydedilmiş yok -> gösterici ile manuel seçim
+            JFileChooser fileChooser = createImageFileChooser(frame);
+            int result = fileChooser.showOpenDialog(frame);
+            if (result == JFileChooser.APPROVE_OPTION) {
+                File selectedFile = fileChooser.getSelectedFile();
                 try {
                     defaultImage = ImageIO.read(selectedFile);
                     if (defaultImage != null) {
@@ -94,9 +133,9 @@ public class PhotoViewerServer {
                 } catch (IOException ex) {
                     photoPanel.setInfo("Fotoğraf yüklenemedi.");
                 }
+            } else {
+                photoPanel.setInfo("Wyndham Grand Istanbul Europe");
             }
-        } else {
-            photoPanel.setInfo("Wyndham Grand Istanbul Europe");
         }
 
         frame.setVisible(true);
@@ -248,6 +287,103 @@ public class PhotoViewerServer {
         return baos.toString("US-ASCII");
     }
 
+    // Yardımcılar -------------------------------------------------------
+
+    public static File getAppDirectory() {
+        try {
+            Path p = new File(PhotoViewerServer.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toPath();
+            File f = p.toFile();
+            if (f.isFile()) return f.getParentFile();
+            return f;
+        } catch (URISyntaxException e) {
+            return new File(System.getProperty("user.dir"));
+        }
+    }
+
+    public static Properties loadProperties(File configFile) {
+        Properties p = new Properties();
+        if (configFile.exists()) {
+            try (FileInputStream fis = new FileInputStream(configFile)) {
+                p.load(fis);
+            } catch (IOException ignored) {}
+        }
+        return p;
+    }
+
+    public static void saveProperties(File configFile, Properties p) {
+        try (FileOutputStream fos = new FileOutputStream(configFile)) {
+            p.store(fos, "PhotoViewer settings");
+        } catch (IOException ignored) {}
+    }
+
+    // Recursively scan a folder for an image file (jpg/jpeg/png/bmp) and return the first readable image.
+    public static BufferedImage scanForDefaultImage(File folder) {
+        if (folder == null || !folder.exists()) return null;
+        try {
+            File[] list = folder.listFiles();
+            if (list == null) return null;
+            // First pass: files in this directory
+            for (File f : list) {
+                if (f.isFile()) {
+                    String name = f.getName().toLowerCase();
+                    if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp")) {
+                        try {
+                            BufferedImage img = ImageIO.read(f);
+                            if (img != null) return img;
+                        } catch (IOException ignored) {}
+                    }
+                }
+            }
+            // Second pass: recurse into subdirectories
+            for (File f : list) {
+                if (f.isDirectory()) {
+                    BufferedImage img = scanForDefaultImage(f);
+                    if (img != null) return img;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    public static JFileChooser createImageFileChooser(JFrame frame) {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Photo Viewer - Wyndham Grand Istanbul Europe");
+        fileChooser.setAcceptAllFileFilterUsed(false);
+        fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileFilter() {
+            @Override
+            public boolean accept(File f) {
+                if (f.isDirectory()) return true;
+                String name = f.getName().toLowerCase();
+                return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp");
+            }
+            @Override
+            public String getDescription() {
+                return "Resim Dosyaları (*.jpg, *.jpeg, *.png, *.bmp)";
+            }
+        });
+
+        JPanel accessory = new JPanel(new BorderLayout());
+        accessory.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        JButton helpBtn = new JButton("Yardım / Hakkında");
+        helpBtn.setToolTipText("Lisans bilgisi ve kısa kullanım yardımı");
+        helpBtn.addActionListener(ev -> {
+            String license = "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
+                    "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
+                    "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek\n\n" +
+                    "Kısa yardım:\n" +
+                    "- Fotoğraf seçmek için dosya seçiciden bir resim seçin (jpg, jpeg, png, bmp).\n" +
+                    "- Tam ekrandayken sağ tık ile çıkış yapabilir veya ESC ile çıkabilirsiniz. \n" +
+                    "İletişim: yusufziyrek1@gmail.com"
+                    ;
+            JOptionPane.showMessageDialog(frame, license, "Yardım / Lisans", JOptionPane.INFORMATION_MESSAGE);
+        });
+        accessory.add(helpBtn, BorderLayout.NORTH);
+        fileChooser.setAccessory(accessory);
+        return fileChooser;
+    }
+
+    // Startup preference dialog and handler removed: startup now directly prompts manual selection when needed.
+
 }
 
 // Fotoğrafı kalite bozulmadan gösteren özel panel
@@ -279,6 +415,38 @@ class PhotoPanel extends JPanel {
     private JMenuItem exitItem = new JMenuItem("Çıkış");
 
     {
+        // Manuel seçim menü öğesi
+        JMenuItem manualItem = new JMenuItem("Manuel Seç");
+        manualItem.addActionListener(ev -> {
+            if (parentFrame == null) return;
+            JFileChooser fc = PhotoViewerServer.createImageFileChooser(parentFrame);
+            int r = fc.showOpenDialog(parentFrame);
+            if (r == JFileChooser.APPROVE_OPTION) {
+                File sel = fc.getSelectedFile();
+                try {
+                    BufferedImage img = ImageIO.read(sel);
+                    if (img != null) {
+                        setImage(img);
+                        // Kaydet: photoviewer.properties içine mode=MANUAL ve savedImagePath yaz
+                        try {
+                            File appDir = PhotoViewerServer.getAppDirectory();
+                            if (appDir == null) appDir = new File(System.getProperty("user.dir"));
+                            File configFile = new File(appDir, "photoviewer.properties");
+                            Properties p = PhotoViewerServer.loadProperties(configFile);
+                            p.setProperty("mode", "MANUAL");
+                            p.setProperty("savedImagePath", sel.getAbsolutePath());
+                            PhotoViewerServer.saveProperties(configFile, p);
+                        } catch (Exception ignore) {}
+                    } else {
+                        JOptionPane.showMessageDialog(parentFrame, "Resim yüklenemedi.", "Hata", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(parentFrame, "Resim yüklenirken hata: " + ex.getMessage(), "Hata", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+        popupMenu.add(manualItem);
+        popupMenu.addSeparator();
         popupMenu.add(exitItem);
         exitItem.addActionListener(new java.awt.event.ActionListener() {
             @Override
@@ -289,7 +457,7 @@ class PhotoPanel extends JPanel {
                 }
             }
         });
-        this.addMouseListener(new MouseAdapter() {
+         this.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
                 if (SwingUtilities.isRightMouseButton(e)) {
