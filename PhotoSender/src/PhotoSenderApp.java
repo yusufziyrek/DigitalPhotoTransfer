@@ -10,6 +10,7 @@ import java.net.Socket;
 import java.util.List;
 
 public class PhotoSenderApp extends JFrame {
+    private static final String VERSION = "1.0.0"; // Versiyon bilgisi eklendi
     private IpList ipList;
     private DefaultListModel<IpList.IpEntry> ipListModel;
     private JList<IpList.IpEntry> ipJList;
@@ -28,7 +29,7 @@ public class PhotoSenderApp extends JFrame {
 
         aboutItem.addActionListener(e -> {
             JOptionPane.showMessageDialog(this,
-                "PhotoSender\n" +
+                "PhotoSender v" + VERSION + "\n" +
                 "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
                 "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
                 "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek",
@@ -82,7 +83,7 @@ public class PhotoSenderApp extends JFrame {
                      BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));) {
                     writer.write("SHOW_DEFAULT\n");
                     writer.flush();
-                    JOptionPane.showMessageDialog(this, "SHOW_DEFAULT komutu gönderildi: " + ip + ":" + port);
+                    JOptionPane.showMessageDialog(this, "İşlem Başarılı " + ip);
                 } catch (IOException ex) {
                     JOptionPane.showMessageDialog(this, "SHOW_DEFAULT gönderilemedi: " + ex.getMessage());
                 }

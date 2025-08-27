@@ -5,6 +5,8 @@
  */
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.ServerSocket;
@@ -15,22 +17,6 @@ public class PhotoViewerServer {
     public static void main(String[] args) {
         int port = 5000; // Dinlenecek port
         JFrame frame = new JFrame();
-        // Hakkında menüsü ekle
-        JMenuBar menuBar = new JMenuBar();
-        JMenu helpMenu = new JMenu("Yardım");
-        JMenuItem aboutItem = new JMenuItem("Hakkında");
-        helpMenu.add(aboutItem);
-        menuBar.add(helpMenu);
-        frame.setJMenuBar(menuBar);
-
-        aboutItem.addActionListener(e -> {
-            JOptionPane.showMessageDialog(frame,
-                "PhotoViewer\n" +
-                "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
-                "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
-                "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek",
-                "Hakkında", JOptionPane.INFORMATION_MESSAGE);
-        });
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setUndecorated(true);
         frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
@@ -38,6 +24,7 @@ public class PhotoViewerServer {
         // Özel panel: kalite bozulmadan fotoğraf gösterimi
         PhotoPanel photoPanel = new PhotoPanel();
         frame.setContentPane(photoPanel);
+        photoPanel.setParentFrame(frame);
 
         // ESC ile kapatma
         frame.addKeyListener(new java.awt.event.KeyAdapter() {
@@ -121,7 +108,6 @@ public class PhotoViewerServer {
                         // Çözüm: Komut satırını doğrudan InputStream'den byte olarak oku
                         // Alternatif: Komut satırı ve kalan veri arasında bir ayraç (örneğin \n) olmalı
                         // Burada kalan veriyi doğrudan in'den okuyoruz
-                        int available = clientSocket.getInputStream().available();
                         int b;
                         while ((b = in.read()) != -1) {
                             baos.write(b);
@@ -155,6 +141,7 @@ public class PhotoViewerServer {
 class PhotoPanel extends JPanel {
     private BufferedImage image = null;
     private String info = "Wyndham Grand Istanbul Europe";
+    private JFrame parentFrame;
 
     public void setImage(BufferedImage img) {
         this.image = img;
@@ -168,6 +155,32 @@ class PhotoPanel extends JPanel {
         this.info = info;
         setBackground(new Color(230, 230, 230));
         repaint();
+    }
+
+    public void setParentFrame(JFrame frame) {
+        this.parentFrame = frame;
+    }
+
+    // Sağ tık menüsü ve çıkış seçeneği
+    private JPopupMenu popupMenu = new JPopupMenu();
+    private JMenuItem exitItem = new JMenuItem("Çıkış");
+
+    {
+        popupMenu.add(exitItem);
+        exitItem.addActionListener(e -> {
+            if (parentFrame != null) {
+                parentFrame.dispose();
+                System.exit(0);
+            }
+        });
+        this.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    popupMenu.show(PhotoPanel.this, e.getX(), e.getY());
+                }
+            }
+        });
     }
 
     @Override
