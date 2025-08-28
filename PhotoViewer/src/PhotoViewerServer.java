@@ -438,15 +438,28 @@ class PhotoPanel extends JPanel {
     private final DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
     private final DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     // Bigger, clearer fonts: large for time, smaller for date (increased per user request)
-    private final Font timeFont = new Font("SansSerif", Font.BOLD, 60);
+    private final Font timeFont = new Font("SansSerif", Font.BOLD, 45);
     private final Font dateFont = new Font("SansSerif", Font.PLAIN, 20);
     private final Timer clockTimer;
     private boolean showClock = true; // can add setter if needed
+
+    // Cursor auto-hide
+    private Cursor defaultCursor;
+    private Cursor blankCursor;
+    private Timer hideCursorTimer;
+    private final int CURSOR_IDLE_MS = 3000; // hide after 3 seconds
+    private volatile boolean cursorHidden = false;
 
     public void setImage(BufferedImage img) {
         this.image = img;
         this.info = null;
         setBackground(Color.BLACK);
+        // show cursor and start hide timer when showing image
+        if (hideCursorTimer != null) {
+            setCursor(defaultCursor);
+            cursorHidden = false;
+            hideCursorTimer.restart();
+        }
         repaint();
     }
 
@@ -454,6 +467,12 @@ class PhotoPanel extends JPanel {
         this.image = null;
         this.info = info;
         setBackground(new Color(230, 230, 230));
+        // when showing info, ensure cursor visible and stop hide timer
+        if (hideCursorTimer != null) {
+            hideCursorTimer.stop();
+            setCursor(defaultCursor);
+            cursorHidden = false;
+        }
         repaint();
     }
 
@@ -518,6 +537,19 @@ class PhotoPanel extends JPanel {
             }
         });
 
+        // Mouse movement: show cursor and restart hide timer
+        this.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                // show cursor if hidden
+                if (cursorHidden) {
+                    setCursor(defaultCursor);
+                    cursorHidden = false;
+                }
+                if (hideCursorTimer != null) hideCursorTimer.restart();
+            }
+        });
+
         // Başlangıçta saat & tarih metinlerini güncelle ve timer başlat
         updateTimeText();
         clockTimer = new Timer(1000, new java.awt.event.ActionListener() {
@@ -530,6 +562,20 @@ class PhotoPanel extends JPanel {
         });
         clockTimer.setCoalesce(true);
         clockTimer.start();
+
+        // Cursor hide timer and cursors (initialized after component created)
+        defaultCursor = getCursor();
+        blankCursor = Toolkit.getDefaultToolkit().createCustomCursor(new BufferedImage(16,16,BufferedImage.TYPE_INT_ARGB), new Point(0,0), "blank");
+        hideCursorTimer = new Timer(CURSOR_IDLE_MS, new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent ev) {
+                SwingUtilities.invokeLater(() -> {
+                    setCursor(blankCursor);
+                    cursorHidden = true;
+                });
+            }
+        });
+        hideCursorTimer.setRepeats(false);
     }
 
     private void updateTimeText() {

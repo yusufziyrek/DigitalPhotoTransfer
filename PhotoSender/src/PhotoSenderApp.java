@@ -23,7 +23,24 @@ public class PhotoSenderApp extends JFrame {
     private JList<IpList.IpEntry> ipJList;
     private JButton addIpButton, selectPhotoButton, sendAllButton, sendSingleButton;
     private File selectedPhoto;
-    private static final File IP_LIST_FILE = new File("iplist.txt");
+    private static final File IP_LIST_FILE = getAppDataIpListFile();
+
+    private static File getAppDataIpListFile() {
+        String appdata = System.getenv("APPDATA"); // %appdata%
+        if (appdata == null || appdata.isEmpty()) {
+            appdata = System.getProperty("user.home"); // fallback
+        }
+        File dir = new File(appdata, "PhotoSender");
+        if (!dir.exists()) {
+            try {
+                dir.mkdirs();
+            } catch (SecurityException ignored) {
+                // Eğer klasör oluşturulamazsa fallback olarak çalışma dizinine dön
+                return new File("iplist.txt");
+            }
+        }
+        return new File(dir, "iplist.txt");
+    }
 
     public PhotoSenderApp() {
         // Hakkında menüsü ekle
