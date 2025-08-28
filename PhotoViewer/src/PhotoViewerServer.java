@@ -438,7 +438,7 @@ class PhotoPanel extends JPanel {
     private final DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
     private final DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     // Bigger, clearer fonts: large for time, smaller for date (increased per user request)
-    private final Font timeFont = new Font("SansSerif", Font.BOLD, 45);
+    private final Font timeFont = new Font("SansSerif", Font.PLAIN, 45);
     private final Font dateFont = new Font("SansSerif", Font.PLAIN, 20);
     private final Timer clockTimer;
     private boolean showClock = true; // can add setter if needed
@@ -450,38 +450,9 @@ class PhotoPanel extends JPanel {
     private final int CURSOR_IDLE_MS = 3000; // hide after 3 seconds
     private volatile boolean cursorHidden = false;
 
-    public void setImage(BufferedImage img) {
-        this.image = img;
-        this.info = null;
-        setBackground(Color.BLACK);
-        // show cursor and start hide timer when showing image
-        if (hideCursorTimer != null) {
-            setCursor(defaultCursor);
-            cursorHidden = false;
-            hideCursorTimer.restart();
-        }
-        repaint();
-    }
-
-    public void setInfo(String info) {
-        this.image = null;
-        this.info = info;
-        setBackground(new Color(230, 230, 230));
-        // when showing info, ensure cursor visible and stop hide timer
-        if (hideCursorTimer != null) {
-            hideCursorTimer.stop();
-            setCursor(defaultCursor);
-            cursorHidden = false;
-        }
-        repaint();
-    }
-
-    public void setParentFrame(JFrame frame) {
-        this.parentFrame = frame;
-    }
-
     // Sağ tık menüsü ve çıkış seçeneği
     private JPopupMenu popupMenu = new JPopupMenu();
+    private JMenuItem clockToggleItem = new JMenuItem("Saat göster");
     private JMenuItem exitItem = new JMenuItem("Çıkış");
 
     {
@@ -517,6 +488,19 @@ class PhotoPanel extends JPanel {
             }
         });
         popupMenu.add(manualItem);
+
+        // Yeni: saat göster/gizle toggle as a simple menu item (no checkbox)
+        updateClockToggleText();
+        clockToggleItem.addActionListener(new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent ev) {
+                showClock = !showClock;
+                updateClockToggleText();
+                repaint();
+            }
+        });
+        popupMenu.add(clockToggleItem);
+
         popupMenu.addSeparator();
         popupMenu.add(exitItem);
         exitItem.addActionListener(new java.awt.event.ActionListener() {
@@ -532,6 +516,10 @@ class PhotoPanel extends JPanel {
             @Override
             public void mousePressed(MouseEvent e) {
                 if (SwingUtilities.isRightMouseButton(e)) {
+                    // menü gösterilmeden önce toggle'ı güncelle (sadece fotoğraf varken etkin)
+                    // update label text and enable state
+                    updateClockToggleText();
+                    clockToggleItem.setEnabled(image != null);
                     popupMenu.show(PhotoPanel.this, e.getX(), e.getY());
                 }
             }
@@ -589,6 +577,84 @@ class PhotoPanel extends JPanel {
         }
     }
 
+    private void updateClockToggleText() {
+        if (clockToggleItem == null) return;
+        if (showClock) {
+            clockToggleItem.setText("Saati gizle");
+        } else {
+            clockToggleItem.setText("Saat göster");
+        }
+    }
+
+    // Public API used by the outer class to control the panel
+    public void setParentFrame(JFrame frame) {
+        this.parentFrame = frame;
+    }
+
+    public void setInfo(String info) {
+        // show info text instead of image
+        this.image = null;
+        this.info = (info != null) ? info : "";
+        // ensure cursor visible when showing info
+        if (defaultCursor == null) defaultCursor = getCursor();
+        setCursor(defaultCursor);
+        cursorHidden = false;
+        if (hideCursorTimer != null) hideCursorTimer.stop();
+        repaint();
+    }
+
+    public void setImage(BufferedImage img) {
+        this.image = img;
+        if (img != null) {
+            // when an image is shown, restart hide timer so cursor will auto-hide
+            if (defaultCursor == null) defaultCursor = getCursor();
+            setCursor(defaultCursor);
+            cursorHidden = false;
+            if (hideCursorTimer != null) hideCursorTimer.restart();
+
+            // ensure dark background while showing images (avoids light strips)
+            setBackground(Color.BLACK);
+        } else {
+            // if clearing the image, stop hide timer and restore info-bg
+            if (hideCursorTimer != null) hideCursorTimer.stop();
+            setBackground(new Color(230, 230, 230));
+        }
+        repaint();
+    }
+
+    // Yeni yardımcı: kenar renklerini örnekleyip ortalayıp gradient için kullanacağız
+    private Color averageEdgeColor(BufferedImage img, boolean top) {
+        if (img == null) return Color.BLACK;
+        int w = img.getWidth();
+        int h = img.getHeight();
+        int samples = Math.min(64, w);
+        long r = 0, g = 0, b = 0, c = 0;
+        for (int i = 0; i < samples; i++) {
+            int x = (int) Math.round((i + 0.5) * w / (double) samples);
+            if (x >= w) x = w - 1;
+            int y = top ? 0 : (h - 1);
+            try {
+                int rgb = img.getRGB(x, y);
+                Color col = new Color(rgb, true);
+                r += col.getRed();
+                g += col.getGreen();
+                b += col.getBlue();
+                c++;
+            } catch (Exception ignored) {}
+        }
+        if (c == 0) return Color.BLACK;
+        return new Color((int) (r / c), (int) (g / c), (int) (b / c));
+    }
+
+    private Color blendWithBlack(Color col, float factor) {
+        int rr = (int) (col.getRed() * (1f - factor));
+        int gg = (int) (col.getGreen() * (1f - factor));
+        int bb = (int) (col.getBlue() * (1f - factor));
+        return new Color(Math.max(0, Math.min(255, rr)),
+                         Math.max(0, Math.min(255, gg)),
+                         Math.max(0, Math.min(255, bb)));
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -596,6 +662,18 @@ class PhotoPanel extends JPanel {
             Graphics2D g2d = (Graphics2D) g;
             g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            // Fill background with a subtle gradient sampled from the image edges
+            Color topColor = averageEdgeColor(image, true);
+            Color bottomColor = averageEdgeColor(image, false);
+            // Slightly darken samples so they don't appear brighter than image
+            topColor = blendWithBlack(topColor, 0.06f);
+            bottomColor = blendWithBlack(bottomColor, 0.06f);
+            java.awt.GradientPaint gp = new java.awt.GradientPaint(0, 0, topColor, 0, getHeight(), bottomColor);
+            g2d.setPaint(gp);
+            g2d.fillRect(0, 0, getWidth(), getHeight());
+
             int imgWidth = image.getWidth();
             int imgHeight = image.getHeight();
             double panelRatio = (double) getWidth() / getHeight();
@@ -603,10 +681,10 @@ class PhotoPanel extends JPanel {
             int drawWidth, drawHeight;
             if (imgRatio > panelRatio) {
                 drawWidth = getWidth();
-                drawHeight = (int) (getWidth() / imgRatio);
+                drawHeight = (int) Math.round(getWidth() / imgRatio);
             } else {
                 drawHeight = getHeight();
-                drawWidth = (int) (getHeight() * imgRatio);
+                drawWidth = (int) Math.round(getHeight() * imgRatio);
             }
             int x = (getWidth() - drawWidth) / 2;
             int y = (getHeight() - drawHeight) / 2;

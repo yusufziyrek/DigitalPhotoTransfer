@@ -61,8 +61,7 @@ public class PhotoSenderApp extends JFrame {
         });
         ipList = new IpList();
         setTitle("Photo Sender - Wyndham Grand Istanbul Europe");
-        setSize(500, 350);
-        setResizable(false);
+        setSize(600, 450);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
