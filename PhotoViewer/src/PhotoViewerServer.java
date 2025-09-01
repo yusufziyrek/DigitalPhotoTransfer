@@ -9,7 +9,6 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.*;
-import java.io.PushbackInputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import javax.imageio.ImageIO;
@@ -19,9 +18,9 @@ import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import javax.swing.Timer;
 
 public class PhotoViewerServer {
+    private static final String VERSION = "1.0.1"; // Versiyon bilgisi eklendi
     public static void main(String[] args) {
         int port = 5000; // Dinlenecek port
         JFrame frame = new JFrame();
@@ -153,7 +152,8 @@ public class PhotoViewerServer {
             // Use PushbackInputStream so we can unread one byte if needed when parsing lines
             PushbackInputStream in = new PushbackInputStream(rawIn, 8192);
             // Ensure we don't block forever waiting for data
-            clientSocket.setSoTimeout(15000);
+            clientSocket.setSoTimeout(15000); // Bu değer sender ile eşleşmeli
+clientSocket.setSoTimeout(10000); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşsin
             // Komut satırını oku (ilk satır) - format: SHOW_DEFAULT OR SEND_PHOTO:<length>
                     String command = readAsciiLine(in);
                     System.out.println("Komut alındı: " + command);
@@ -330,27 +330,19 @@ public class PhotoViewerServer {
      * or the user's home directory.
      */
     public static File getConfigFile() {
-        File appDir = getAppDirectory();
-        File candidate = appDir != null ? appDir : new File(System.getProperty("user.dir"));
-        // Ensure directory exists
-        try {
-            candidate.mkdirs();
-            // Try to write a tiny probe file to check writability
-            File probe = new File(candidate, ".pv_write_test");
-            try (FileOutputStream fos = new FileOutputStream(probe)) {
-                fos.write(0);
-            }
-            probe.delete();
-        } catch (Exception e) {
-            // fallback to APPDATA
-            String appdata = System.getenv("APPDATA");
-            if (appdata != null && !appdata.isEmpty()) {
-                candidate = new File(appdata, "PhotoViewer");
-            } else {
-                candidate = new File(System.getProperty("user.home"), ".photoviewer");
-            }
-            candidate.mkdirs();
+        // Öncelik: %APPDATA%/PhotoViewer
+        String appdata = System.getenv("APPDATA");
+        File candidate;
+        if (appdata != null && !appdata.isEmpty()) {
+            candidate = new File(appdata, "PhotoViewer");
+        } else {
+            // Eğer APPDATA yoksa kullanıcı dizinine gizli bir klasör
+            candidate = new File(System.getProperty("user.home"), ".photoviewer");
         }
+        // Ensure directory exists and is writable
+        try {
+            if (!candidate.exists()) candidate.mkdirs();
+        } catch (Exception ignored) {}
         return new File(candidate, "photoviewer.properties");
     }
 
@@ -385,7 +377,7 @@ public class PhotoViewerServer {
 
     public static JFileChooser createImageFileChooser(JFrame frame) {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Photo Viewer - Wyndham Grand Istanbul Europe");
+        fileChooser.setDialogTitle("Photo Viewer - Wyndham Grand Istanbul Europe - "+ "v" +VERSION);
         fileChooser.setAcceptAllFileFilterUsed(false);
         fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileFilter() {
             @Override
@@ -402,6 +394,8 @@ public class PhotoViewerServer {
 
         JPanel accessory = new JPanel(new BorderLayout());
         accessory.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        // Yardım / Hakkında butonu (eski hali)
         JButton helpBtn = new JButton("Yardım / Hakkında");
         helpBtn.setToolTipText("Lisans bilgisi ve kısa kullanım yardımı");
         helpBtn.addActionListener(new java.awt.event.ActionListener() {
