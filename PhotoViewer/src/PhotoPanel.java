@@ -15,15 +15,16 @@ import javax.imageio.ImageIO;
  * Fotoğrafı kalite bozulmadan gösteren özel panel
  */
 public class PhotoPanel extends JPanel {
-    private BufferedImage image = null;
+    private static final long serialVersionUID = 1L;
+    private transient BufferedImage image = null;
     private String info = "Wyndham Grand Istanbul Europe";
     private JFrame parentFrame;
 
     // Clock & date overlay
     private volatile String timeText = "";
     private volatile String dateText = "";
-    private final DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
-    private final DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    private final transient DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
+    private final transient DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     // Bigger, clearer fonts: large for time, smaller for date (increased per user request)
     private final Font timeFont = new Font("SansSerif", Font.PLAIN, 45);
     private final Font dateFont = new Font("SansSerif", Font.PLAIN, 20);

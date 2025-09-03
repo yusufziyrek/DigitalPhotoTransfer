@@ -15,8 +15,9 @@ import java.net.URISyntaxException;
 import java.nio.file.Path;
 
 public class PhotoViewerServer {
-    private static final String VERSION = "1.0.3";
+    private static final String VERSION = "1.0.5";
     private static final AppLogger logger = new AppLogger("PhotoViewer");
+    private static UpdateManager updateManager = null;
     
     public static void main(String[] args) {
         int port = 5000; // Dinlenecek port
@@ -141,6 +142,10 @@ public class PhotoViewerServer {
         frame.setVisible(true);
         logger.info("PhotoViewer UI başlatıldı, port: " + port);
 
+        // UpdateManager'ı başlat ve otomatik güncelleme kontrolü yap
+        updateManager = new UpdateManager(VERSION, frame);
+        updateManager.checkForUpdatesOnStartup();
+
     try (ServerSocket serverSocket = new ServerSocket(port)) {
             logger.success("Sunucu başarıyla başlatıldı - Port: " + port);
             System.out.println("Sunucu dinleniyor: " + port);
@@ -153,8 +158,7 @@ public class PhotoViewerServer {
             // Use PushbackInputStream so we can unread one byte if needed when parsing lines
             PushbackInputStream in = new PushbackInputStream(rawIn, 8192);
             // Ensure we don't block forever waiting for data
-            clientSocket.setSoTimeout(15000); // Bu değer sender ile eşleşmeli
-clientSocket.setSoTimeout(10000); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşsin
+            clientSocket.setSoTimeout(10000); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşsin
             // Komut satırını oku (ilk satır) - format: SHOW_DEFAULT OR SEND_PHOTO:<length>
                     String command = readAsciiLine(in);
                     logger.info("Komut alındı: " + command + " (Kaynak: " + clientIP + ")");
@@ -183,9 +187,13 @@ clientSocket.setSoTimeout(10000); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşs
                                 
                                 if (image != null) {
                                     photoPanel.setImageWithTimer(image, durationSeconds, defaultImage);
-                                    logger.success("Zamanlı fotoğraf alındı: " + (durationSeconds / 86400) + " gün, " + 
-                                                 ((durationSeconds % 86400) / 3600) + " saat gösterilecek (Kaynak: " + clientIP + ")");
-                                    System.out.println("Zamanlı fotoğraf alındı: " + (durationSeconds / 86400) + " gün gösterilecek");
+                                    long days = durationSeconds / 86400;
+                                    long hours = (durationSeconds % 86400) / 3600;
+                                    long minutes = (durationSeconds % 3600) / 60;
+                                    long seconds = durationSeconds % 60;
+                                    String durStr = String.format("%d gün, %d saat, %d dakika, %d saniye", days, hours, minutes, seconds);
+                                    logger.success("Zamanlı fotoğraf alındı: " + durStr + " gösterilecek (Kaynak: " + clientIP + ")");
+                                    System.out.println("Zamanlı fotoğraf alındı: " + durStr + " gösterilecek");
                                     
                                     // Send ACK back to sender
                                     try {
@@ -387,7 +395,7 @@ clientSocket.setSoTimeout(10000); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşs
             }
         });
 
-        JPanel accessory = new JPanel(new GridLayout(2, 1, 0, 8));
+        JPanel accessory = new JPanel(new GridLayout(3, 1, 0, 8));
         accessory.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         // Ayrı "Yardım" butonu - detaylı kullanım kılavuzu
@@ -444,8 +452,26 @@ clientSocket.setSoTimeout(10000); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşs
             }
         });
 
+        // Güncelleme kontrolü butonu
+        JButton updateBtn = new JButton("Güncellemeleri Kontrol Et");
+        updateBtn.setToolTipText("GitHub'dan yeni sürüm kontrolü yapar");
+        updateBtn.addActionListener(new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent ev) {
+                if (updateManager != null) {
+                    updateManager.checkForUpdatesManual();
+                } else {
+                    JOptionPane.showMessageDialog(frame, 
+                        "Güncelleme yöneticisi henüz hazır değil. Lütfen birkaç saniye bekleyin.", 
+                        "Bilgi", 
+                        JOptionPane.INFORMATION_MESSAGE);
+                }
+            }
+        });
+
         accessory.add(helpBtn);
         accessory.add(aboutBtn);
+        accessory.add(updateBtn);
         fileChooser.setAccessory(accessory);
         return fileChooser;
     }

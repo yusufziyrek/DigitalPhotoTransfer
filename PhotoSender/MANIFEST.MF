@@ -1,2 +1,2 @@
-Manifest-Version: 1.0.4
+Manifest-Version: 1.0.5
 Main-Class: PhotoSenderApp

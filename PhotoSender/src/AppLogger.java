@@ -26,7 +26,7 @@ public class AppLogger {
         this.logFile = createLogFile();
         
         // Başlangıç log'u
-        log("INFO", "Uygulama başlatıldı - " + appName + " v1.0.3");
+        log("INFO", "Uygulama başlatıldı - " + appName + " v1.0.4");
     }
     
     /**
