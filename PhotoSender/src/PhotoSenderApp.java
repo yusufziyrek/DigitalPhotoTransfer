@@ -17,7 +17,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class PhotoSenderApp extends JFrame {
-    private static final String VERSION = "1.0.3";
+    private static final String VERSION = "1.0.4";
     private static final AppLogger logger = new AppLogger("PhotoSender");
     
     private IpList ipList;
@@ -45,6 +45,7 @@ public class PhotoSenderApp extends JFrame {
     }
 
     public PhotoSenderApp() {
+        //checkForUpdateAndInstall(); // Uygulama başlatıldığında otomatik güncelleme kontrolü
         // Hakkında menüsü ekle
         JMenuBar menuBar = new JMenuBar();
         JMenu helpMenu = new JMenu("Yardım");
@@ -56,7 +57,7 @@ public class PhotoSenderApp extends JFrame {
         menuBar.add(helpMenu);
         setJMenuBar(menuBar);
 
-        usageGuideItem.addActionListener(e -> {
+    usageGuideItem.addActionListener(_ -> {
             String usageGuide = "PhotoSender Kullanım Kılavuzu\n\n" +
                 "1. IP ADRESİ YÖNETİMİ:\n" +
                 "   • 'IP Ekle' butonu ile yeni IP adresi ekleyin\n" +
@@ -90,7 +91,7 @@ public class PhotoSenderApp extends JFrame {
                 "Kullanım Kılavuzu", JOptionPane.INFORMATION_MESSAGE);
         });
 
-        aboutItem.addActionListener(e -> {
+    aboutItem.addActionListener(_ -> {
             JOptionPane.showMessageDialog(this,
                 "PhotoSender v" + VERSION + "\n" +
                 "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
@@ -138,7 +139,7 @@ public class PhotoSenderApp extends JFrame {
         });
 
             // Default Ayarı Koy işlemi
-            defaultItem.addActionListener(e -> {
+            defaultItem.addActionListener(_ -> {
                 IpList.IpEntry selected = ipJList.getSelectedValue();
                 if (selected == null) return;
                 String ip = selected.getIp();
@@ -153,7 +154,7 @@ public class PhotoSenderApp extends JFrame {
                 }
             });
         // Güncelleme işlemi
-        updateItem.addActionListener(e -> {
+    updateItem.addActionListener(_ -> {
             IpList.IpEntry selected = ipJList.getSelectedValue();
             if (selected == null) return;
             JTextField ipField = new JTextField(selected.getIp());
@@ -177,7 +178,7 @@ public class PhotoSenderApp extends JFrame {
         });
 
         // Silme işlemi
-        deleteItem.addActionListener(e -> {
+    deleteItem.addActionListener(_ -> {
             int idx = ipJList.getSelectedIndex();
             if (idx >= 0) {
                 ipList.getIpEntries().remove(idx);
@@ -218,7 +219,7 @@ public class PhotoSenderApp extends JFrame {
         panel.add(sendWithTimerButton);
         add(panel, BorderLayout.SOUTH);
 
-        addIpButton.addActionListener(e -> {
+    addIpButton.addActionListener(_ -> {
             JTextField ipField = new JTextField();
             JTextField nameField = new JTextField();
             Object[] fields = {"IP Adresi:", ipField, "İsim:", nameField};
@@ -242,7 +243,7 @@ public class PhotoSenderApp extends JFrame {
             }
         });
 
-        selectPhotoButton.addActionListener(e -> {
+    selectPhotoButton.addActionListener(_ -> {
             JFileChooser chooser = new JFileChooser();
             chooser.setFileFilter(new javax.swing.filechooser.FileFilter() {
                 @Override
@@ -275,7 +276,7 @@ public class PhotoSenderApp extends JFrame {
             }
         });
 
-        sendAllButton.addActionListener(e -> {
+    sendAllButton.addActionListener(_ -> {
             if (selectedPhoto == null) {
                 JOptionPane.showMessageDialog(this, "Önce fotoğraf seçin.");
                 return;
@@ -284,7 +285,7 @@ public class PhotoSenderApp extends JFrame {
             sendPhotoToIps(selectedPhoto, ipList.getIpEntries());
         });
 
-        sendSingleButton.addActionListener(e -> {
+    sendSingleButton.addActionListener(_ -> {
             if (selectedPhoto == null) {
                 JOptionPane.showMessageDialog(this, "Önce fotoğraf seçin.");
                 return;
@@ -297,7 +298,7 @@ public class PhotoSenderApp extends JFrame {
             sendPhotoToIps(selectedPhoto, List.of(selected));
         });
 
-        sendWithTimerButton.addActionListener(e -> {
+    sendWithTimerButton.addActionListener(_ -> {
             if (selectedPhoto == null) {
                 JOptionPane.showMessageDialog(this, "Önce fotoğraf seçin.");
                 return;
@@ -809,15 +810,15 @@ public class PhotoSenderApp extends JFrame {
         dialog.add(buttonPanel, BorderLayout.SOUTH);
 
         // Hızlı butonların event'leri
-        btn1Hour.addActionListener(e -> sendWithDuration(targetEntry, 1 * 3600, dialog));
-        btn6Hours.addActionListener(e -> sendWithDuration(targetEntry, 6 * 3600, dialog));
-        btn1Day.addActionListener(e -> sendWithDuration(targetEntry, 24 * 3600, dialog));
-        btn3Days.addActionListener(e -> sendWithDuration(targetEntry, 3 * 24 * 3600, dialog));
-        btn1Week.addActionListener(e -> sendWithDuration(targetEntry, 7 * 24 * 3600, dialog));
-        btn1Month.addActionListener(e -> sendWithDuration(targetEntry, 30 * 24 * 3600, dialog));
+    btn1Hour.addActionListener(_ -> sendWithDuration(targetEntry, 1 * 3600, dialog));
+    btn6Hours.addActionListener(_ -> sendWithDuration(targetEntry, 6 * 3600, dialog));
+    btn1Day.addActionListener(_ -> sendWithDuration(targetEntry, 24 * 3600, dialog));
+    btn3Days.addActionListener(_ -> sendWithDuration(targetEntry, 3 * 24 * 3600, dialog));
+    btn1Week.addActionListener(_ -> sendWithDuration(targetEntry, 7 * 24 * 3600, dialog));
+    btn1Month.addActionListener(_ -> sendWithDuration(targetEntry, 30 * 24 * 3600, dialog));
 
         // Özel süre gönder butonu
-        sendButton.addActionListener(e -> {
+    sendButton.addActionListener(_ -> {
             int days = (Integer) daySpinner.getValue();
             int hours = (Integer) hourSpinner.getValue();
             int minutes = (Integer) minuteSpinner.getValue();
@@ -833,7 +834,7 @@ public class PhotoSenderApp extends JFrame {
             sendWithDuration(targetEntry, totalSeconds, dialog);
         });
 
-        cancelButton.addActionListener(e -> dialog.dispose());
+    cancelButton.addActionListener(_ -> dialog.dispose());
 
         dialog.setVisible(true);
     }
@@ -879,6 +880,222 @@ public class PhotoSenderApp extends JFrame {
             } else {
                 return days + " gün " + remainingHours + " saat";
             }
+        }
+    }
+
+    // --- GÜNCELLEME KONTROLÜ EKLE ---
+    private static final String JAR_ASSET_NAME = "PhotoSenderApp.jar"; // Release'deki jar dosyasının adı
+    private static final String ASSET_API_PREFIX = "https://api.github.com/repos/yusufziyrek/DigitalPhotoTransfer/releases/assets/";
+    private static final String GITHUB_TOKEN = "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"; // Buraya kendi tokenınızı girin
+    private static final String GITHUB_API_URL = "https://api.github.com/repos/yusufziyrek/DigitalPhotoTransfer/releases/latest"; // Latest release API endpoint
+
+    private void checkForUpdateAndInstall() {
+    final String[] latestVersion = {null};
+    final String[] downloadUrl = {null};
+    final String[] assetApiUrl = {null};
+    SwingWorker<Void, Void> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() {
+                try {
+                    java.net.URL url = new java.net.URL(GITHUB_API_URL);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+                    conn.setRequestProperty("Authorization", "Bearer " + GITHUB_TOKEN); // Token ekle
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    try (java.io.InputStream is = conn.getInputStream()) {
+                        String json = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                        // tag_name
+                        java.util.regex.Matcher mTag = java.util.regex.Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").matcher(json);
+                        if (mTag.find()) latestVersion[0] = mTag.group(1);
+
+                        // assets array - find the assets block then each object
+                        java.util.regex.Matcher mAssets = java.util.regex.Pattern.compile("\"assets\"\\s*:\\s*\\[(.*?)\\]", java.util.regex.Pattern.DOTALL).matcher(json);
+                        if (mAssets.find()) {
+                            String assetsBlock = mAssets.group(1);
+                            java.util.regex.Matcher mObj = java.util.regex.Pattern.compile("\\{(.*?)\\}(,|$)", java.util.regex.Pattern.DOTALL).matcher(assetsBlock);
+                            while (mObj.find()) {
+                                String obj = mObj.group(1);
+                                java.util.regex.Matcher mName = java.util.regex.Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"").matcher(obj);
+                                if (mName.find()) {
+                                    String name = mName.group(1);
+                                    if (JAR_ASSET_NAME.equals(name) || name.endsWith(JAR_ASSET_NAME)) {
+                                        java.util.regex.Matcher mId = java.util.regex.Pattern.compile("\"id\"\\s*:\\s*(\\d+)").matcher(obj);
+                                        if (mId.find()) {
+                                            assetApiUrl[0] = ASSET_API_PREFIX + mId.group(1);
+                                        }
+                                        java.util.regex.Matcher mBrowser = java.util.regex.Pattern.compile("\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"").matcher(obj);
+                                        if (mBrowser.find()) {
+                                            downloadUrl[0] = mBrowser.group(1);
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    System.out.println("Güncelleme kontrol hatası: " + ex.getMessage());
+                }
+                System.out.println("Güncelleme kontrolü başlatıldı");
+                return null;
+            }
+            @Override
+            protected void done() {
+                // Private repo ise assetApiUrl kullanılır, public repo ise downloadUrl
+                String urlToDownload = assetApiUrl[0] != null ? assetApiUrl[0] : downloadUrl[0];
+                if (latestVersion[0] != null && !VERSION.equals(latestVersion[0]) && urlToDownload != null) {
+                    int result = JOptionPane.showConfirmDialog(PhotoSenderApp.this,
+                        "Yeni sürüm mevcut: " + latestVersion[0] + "\nOtomatik güncelleme başlatılsın mı?",
+                        "Güncelleme", JOptionPane.YES_NO_OPTION);
+                    if (result == JOptionPane.YES_OPTION) {
+                        downloadAndInstallUpdate(urlToDownload, assetApiUrl[0] != null);
+                    }
+                }
+                System.out.println("Güncelleme kontrolü tamamlandı: latestVersion=" + latestVersion[0] + ", downloadUrl=" + downloadUrl[0]);
+            }
+        };
+        worker.execute();
+    }
+
+    private void downloadAndInstallUpdate(String url, boolean isPrivateAssetApi) {
+    File appDataDir = new File(System.getenv("APPDATA") != null ? System.getenv("APPDATA") : System.getProperty("user.home"), "PhotoSender");
+    if (!appDataDir.exists()) try { appDataDir.mkdirs(); } catch (Exception ignored) {}
+    File newJar = new File(appDataDir, "PhotoSenderApp_new.jar");
+        java.net.HttpURLConnection conn = null;
+        try {
+            java.net.URL downloadURL = new java.net.URL(url);
+            conn = (java.net.HttpURLConnection) downloadURL.openConnection();
+            conn.setInstanceFollowRedirects(false); // handle redirects manually so we can drop auth on redirect
+
+            if (isPrivateAssetApi) {
+                conn.setRequestProperty("Authorization", "Bearer " + GITHUB_TOKEN);
+                conn.setRequestProperty("Accept", "application/octet-stream");
+            }
+
+            int code = conn.getResponseCode();
+            java.io.InputStream inStream = null;
+
+            if (code == java.net.HttpURLConnection.HTTP_MOVED_PERM || code == java.net.HttpURLConnection.HTTP_MOVED_TEMP || code == 302) {
+                // GitHub may redirect to an S3 URL; follow the Location header without Authorization
+                String location = conn.getHeaderField("Location");
+                if (location == null) throw new IOException("Redirect without Location header (code=" + code + ")");
+                java.net.URL redirected = new java.net.URL(location);
+                java.net.HttpURLConnection redirectedConn = (java.net.HttpURLConnection) redirected.openConnection();
+                // drop Authorization header on redirected request
+                redirectedConn.setInstanceFollowRedirects(true);
+                int rc2 = redirectedConn.getResponseCode();
+                if (rc2 >= 400) {
+                    String err = readStream(redirectedConn.getErrorStream());
+                    throw new IOException("HTTP " + rc2 + " " + redirectedConn.getResponseMessage() + " -> " + (err == null ? "" : err));
+                }
+                inStream = redirectedConn.getInputStream();
+            } else if (code >= 400) {
+                String err = readStream(conn.getErrorStream());
+                throw new IOException("HTTP " + code + " " + conn.getResponseMessage() + " -> " + (err == null ? "" : err));
+            } else {
+                inStream = conn.getInputStream();
+            }
+
+            try (java.io.InputStream in = inStream; java.io.FileOutputStream out = new java.io.FileOutputStream(newJar)) {
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = in.read(buf)) != -1) {
+                    out.write(buf, 0, len);
+                }
+            }
+
+                    // Indirme tamamlandi - Program Files korumali olabilir. Kullaniciya konumu bildir.
+            int choice = JOptionPane.showOptionDialog(this,
+                "Güncelleme indirildi: " + newJar.getAbsolutePath() + "\nProgram Files altındaki kurulum nedeniyle otomatik olarak üzerine yazılamayabilir. Klasörü açmak veya yükseltilmiş olarak kopyalamayı denemek ister misiniz?",
+                "Güncelleme indirildi",
+                JOptionPane.YES_NO_CANCEL_OPTION,
+                JOptionPane.INFORMATION_MESSAGE,
+                null,
+                new String[]{"Klasörü Aç","Yükseltilmiş Kopyala","İptal"},
+                "Klasörü Aç");
+
+            if (choice == 0) {
+                try { java.awt.Desktop.getDesktop().open(appDataDir); } catch (Exception ex) { /* ignore */ }
+            } else if (choice == 1) {
+                // Attempt elevated copy to the running jar location
+                try {
+                    String destPath = null;
+                    try {
+                        java.net.URI loc = PhotoSenderApp.class.getProtectionDomain().getCodeSource().getLocation().toURI();
+                        File current = new File(loc.getPath());
+                        destPath = current.getAbsolutePath();
+                        // if running from classes directory, dest may be a folder; try to locate jar name
+                        if (current.isDirectory()) {
+                            destPath = new File(System.getProperty("user.dir"), "PhotoSenderApp.jar").getAbsolutePath();
+                        }
+                    } catch (Exception ex) {
+                        destPath = "C:\\Program Files\\PhotoSender\\PhotoSenderApp.jar";
+                    }
+
+                    String copyCmd = "Copy-Item -Force -Path '" + newJar.getAbsolutePath().replace("'","''") + "' -Destination '" + destPath.replace("'","''") + "'";
+                    String psArg = "-NoProfile -ExecutionPolicy Bypass -Command \"Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command \"" + copyCmd + "\"'\"";
+                    ProcessBuilder pb = new ProcessBuilder("powershell", psArg);
+                    pb.inheritIO();
+                    pb.start();
+                    JOptionPane.showMessageDialog(this, "Yükseltilmiş kopyalama talebi başlatıldı. UAC onayı gerekebilir.");
+                    System.exit(0);
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this, "Yükseltilmiş kopyalama yapılamadı: " + ex.getMessage());
+                }
+            }
+        } catch (Exception ex) {
+            // Provide richer error information to help debugging (HTTP status, body)
+            String msg = ex.getMessage();
+            String detail = msg != null ? msg : ex.toString();
+            JOptionPane.showMessageDialog(this, "Güncelleme indirilemedi: " + url + "\nHata: " + detail);
+
+            // If we used the asset API URL and it failed, attempt a best-effort fallback to releases/download URL
+            if (isPrivateAssetApi && url != null && url.startsWith("https://api.github.com/")) {
+                String fallbackUrl = url.replace("https://api.github.com/repos/yusufziyrek/DigitalPhotoTransfer/releases/assets/", "https://github.com/yusufziyrek/DigitalPhotoTransfer/releases/download/");
+                try {
+                    File newJarFallback = new File("PhotoSenderApp_new.jar");
+                    java.net.URL fallbackDownloadURL = new java.net.URL(fallbackUrl);
+                    java.net.HttpURLConnection fallbackConn = (java.net.HttpURLConnection) fallbackDownloadURL.openConnection();
+                    int fc = fallbackConn.getResponseCode();
+                    if (fc >= 400) {
+                        String err = readStream(fallbackConn.getErrorStream());
+                        throw new IOException("HTTP " + fc + " " + fallbackConn.getResponseMessage() + " -> " + (err == null ? "" : err));
+                    }
+                    try (java.io.InputStream in = fallbackConn.getInputStream(); java.io.FileOutputStream out = new java.io.FileOutputStream(newJarFallback)) {
+                        byte[] buf = new byte[8192];
+                        int len;
+                        while ((len = in.read(buf)) != -1) {
+                            out.write(buf, 0, len);
+                        }
+                    }
+                    JOptionPane.showMessageDialog(this, "Güncelleme indirildi (fallback). Uygulama yeniden başlatılıyor...");
+                    ProcessBuilder pb = new ProcessBuilder("java", "-jar", newJarFallback.getAbsolutePath());
+                    pb.start();
+                    System.exit(0);
+                } catch (Exception ex2) {
+                    String detail2 = ex2.getMessage() != null ? ex2.getMessage() : ex2.toString();
+                    JOptionPane.showMessageDialog(this, "Güncelleme fallback ile de indirilemedi: " + fallbackUrl + "\nHata: " + detail2);
+                }
+            }
+        } finally {
+            if (conn != null) {
+                try { conn.disconnect(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private static String readStream(java.io.InputStream is) {
+        if (is == null) return null;
+        try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            return sb.toString().trim();
+        } catch (IOException e) {
+            return null;
         }
     }
 
