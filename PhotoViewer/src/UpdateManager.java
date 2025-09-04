@@ -11,6 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.*;
 import java.awt.*;
+import java.awt.Desktop;
 
 /**
  * GitHub release üzerinden güncelleme kontrolü yapan sınıf
@@ -24,18 +25,53 @@ import java.awt.*;
  * - Otomatik indirme ve kurulum özelliği ile progress bar desteği
  */
 public class UpdateManager {
-    private static final String GITHUB_API_URL = "https://api.github.com/repos/yusufziyrek/DigitalPhotoTransfer/releases/latest";
-    private static final String DOWNLOAD_URL_TEMPLATE = "https://github.com/yusufziyrek/DigitalPhotoTransfer/releases/download/{tag}/PhotoViewer-{version}.msi";
-    private static final AppLogger logger = new AppLogger("UpdateManager");
+    private final AppLogger logger; // PhotoViewerServer'dan parametre olarak gelecek
     
     private final String currentVersion;
     private final JFrame parentFrame;
+    private boolean isReady = false; // UpdateManager hazır olduğunu belirten flag
     
-    public UpdateManager(String currentVersion, JFrame parentFrame) {
+    public UpdateManager(String currentVersion, JFrame parentFrame, AppLogger logger) {
         this.currentVersion = currentVersion;
         this.parentFrame = parentFrame;
+        this.logger = logger; // PhotoViewerServer'dan alınan logger'ı kullan
         logger.info("UpdateManager başlatıldı - Güncel sürüm: v" + currentVersion);
-        logger.info("GitHub Repository: " + GITHUB_API_URL);
+        logger.info("GitHub Repository: " + AppConstants.GITHUB_API_URL);
+        this.isReady = true; // Constructor tamamlandığında hazır
+    }
+    
+    /**
+     * UpdateManager'ın hazır olup olmadığını kontrol eder
+     */
+    public boolean isReady() {
+        return isReady;
+    }
+    
+    /**
+     * File chooser açıldığında otomatik güncelleme kontrolü yapar
+     */
+    public void checkForUpdatesOnFileChooser() {
+        logger.info("File chooser otomatik güncelleme kontrolü başlatılıyor...");
+        new Thread(() -> {
+            try {
+                UpdateInfo updateInfo = checkForUpdates();
+                if (updateInfo != null && updateInfo.hasUpdate) {
+                    // PhotoViewer MSI dosyası bulundu, kullanıcıya bildir
+                    logger.success("File chooser otomatik kontrol: PhotoViewer MSI dosyası bulundu! Release: v" + updateInfo.latestVersion);
+                    SwingUtilities.invokeLater(() -> {
+                        showUpdateNotification(updateInfo);
+                    });
+                } else if (updateInfo != null && updateInfo.errorMessage != null) {
+                    logger.warn("File chooser otomatik güncelleme kontrolü sonucu: " + updateInfo.errorMessage);
+                } else if (updateInfo != null) {
+                    logger.info("File chooser otomatik güncelleme kontrolü tamamlandı. PhotoViewer MSI dosyası bulunamadı.");
+                } else {
+                    logger.warn("File chooser otomatik güncelleme kontrolü başarısız oldu");
+                }
+            } catch (Exception e) {
+                logger.warn("File chooser otomatik güncelleme kontrolü başarısız: " + e.getMessage());
+            }
+        }).start();
     }
     
     /**
@@ -43,30 +79,29 @@ public class UpdateManager {
      */
     public void checkForUpdatesOnStartup() {
         logger.info("Otomatik güncelleme kontrolü başlatılıyor...");
-        SwingUtilities.invokeLater(() -> {
-            new Thread(() -> {
-                try {
-                    Thread.sleep(2000); // 2 saniye bekle ki UI yüklensin
-                    logger.info("UI yüklendi, güncelleme kontrolü yapılıyor...");
-                    UpdateInfo updateInfo = checkForUpdates();
-                    if (updateInfo != null && updateInfo.hasUpdate) {
-                        // PhotoViewer MSI dosyası bulundu, kullanıcıya bildir
-                        logger.success("PhotoViewer MSI dosyası bulundu! Release: v" + updateInfo.latestVersion);
-                        SwingUtilities.invokeLater(() -> {
-                            showUpdateNotification(updateInfo);
-                        });
-                    } else if (updateInfo != null && updateInfo.errorMessage != null) {
-                        logger.warn("Otomatik güncelleme kontrolü sonucu: " + updateInfo.errorMessage);
-                    } else if (updateInfo != null) {
-                        logger.info("Otomatik güncelleme kontrolü tamamlandı. PhotoViewer MSI dosyası bulunamadı.");
-                    } else {
-                        logger.warn("Otomatik güncelleme kontrolü başarısız oldu");
-                    }
-                } catch (Exception e) {
-                    logger.warn("Otomatik güncelleme kontrolü başarısız: " + e.getMessage());
+        // EDT violation düzeltmesi: direkt background thread başlat
+        new Thread(() -> {
+            try {
+                Thread.sleep(AppConstants.UI_READY_DELAY_MS); // UI hazırlanması için bekle
+                logger.info("UI hazırlandı, güncelleme kontrolü yapılıyor...");
+                UpdateInfo updateInfo = checkForUpdates();
+                if (updateInfo != null && updateInfo.hasUpdate) {
+                    // PhotoViewer MSI dosyası bulundu, kullanıcıya bildir
+                    logger.success("PhotoViewer MSI dosyası bulundu! Release: v" + updateInfo.latestVersion);
+                    SwingUtilities.invokeLater(() -> {
+                        showUpdateNotification(updateInfo);
+                    });
+                } else if (updateInfo != null && updateInfo.errorMessage != null) {
+                    logger.warn("Otomatik güncelleme kontrolü sonucu: " + updateInfo.errorMessage);
+                } else if (updateInfo != null) {
+                    logger.info("Otomatik güncelleme kontrolü tamamlandı. PhotoViewer MSI dosyası bulunamadı.");
+                } else {
+                    logger.warn("Otomatik güncelleme kontrolü başarısız oldu");
                 }
-            }).start();
-        });
+            } catch (Exception e) {
+                logger.warn("Otomatik güncelleme kontrolü başarısız: " + e.getMessage());
+            }
+        }).start();
     }
     
     /**
@@ -93,7 +128,27 @@ public class UpdateManager {
                                 dialog.dispose();
                                 if (updateInfo != null && updateInfo.hasUpdate) {
                                     logger.success("Manuel kontrol: PhotoViewer MSI dosyası bulundu! Release: v" + updateInfo.latestVersion);
-                                    showUpdateDialog(updateInfo);
+                                    
+                                    // Basit onay dialog'u göster
+                                    String message = "PhotoViewer güncellemesi mevcut!\n\n" +
+                                                    "Yeni sürüm: v" + updateInfo.latestVersion + "\n" +
+                                                    "MSI dosyası indirilerek kurulum başlatılacak.\n\n" +
+                                                    "Şimdi güncellemek ister misiniz?";
+                                    
+                                    int choice = JOptionPane.showConfirmDialog(
+                                        parentFrame, 
+                                        message, 
+                                        "Güncelleme Mevcut", 
+                                        JOptionPane.YES_NO_OPTION, 
+                                        JOptionPane.QUESTION_MESSAGE
+                                    );
+                                    
+                                    if (choice == JOptionPane.YES_OPTION) {
+                                        logger.info("Kullanıcı manuel kontrolden güncellemeyi kabul etti");
+                                        downloadUpdate(updateInfo);
+                                    } else {
+                                        logger.info("Kullanıcı manuel kontrolden güncellemeyi reddetti");
+                                    }
                                 } else if (updateInfo != null) {
                                     String message;
                                     if (updateInfo.errorMessage != null) {
@@ -105,12 +160,12 @@ public class UpdateManager {
                                     }
                                     JOptionPane.showMessageDialog(parentFrame, 
                                         message, 
-                                        "Güncelleme Kontrolü", 
+                                        AppMessages.TITLE_UPDATE, 
                                         updateInfo.errorMessage != null ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
                                 } else {
                                     JOptionPane.showMessageDialog(parentFrame, 
-                                        "Güncelleme kontrolü yapılamadı. İnternet bağlantınızı kontrol edin.", 
-                                        "Hata", 
+                                        AppMessages.ERROR_UPDATE_CHECK + ". İnternet bağlantınızı kontrol edin.", 
+                                        AppMessages.TITLE_ERROR, 
                                         JOptionPane.ERROR_MESSAGE);
                                 }
                             });
@@ -119,8 +174,8 @@ public class UpdateManager {
                                 dialog.dispose();
                                 logger.error("Manuel güncelleme kontrolü başarısız", e);
                                 JOptionPane.showMessageDialog(parentFrame, 
-                                    "Güncelleme kontrolü sırasında hata: " + e.getMessage(), 
-                                    "Hata", 
+                                    AppMessages.withException(AppMessages.ERROR_UPDATE_CHECK, e), 
+                                    AppMessages.TITLE_ERROR, 
                                     JOptionPane.ERROR_MESSAGE);
                             });
                         }
@@ -137,16 +192,16 @@ public class UpdateManager {
      */
     private UpdateInfo checkForUpdates() {
         try {
-            logger.info("Güncelleme kontrolü başlatılıyor: " + GITHUB_API_URL);
+            logger.info("Güncelleme kontrolü başlatılıyor: " + AppConstants.GITHUB_API_URL);
             
-            URI uri = URI.create(GITHUB_API_URL);
+            URI uri = URI.create(AppConstants.GITHUB_API_URL);
             URL url = uri.toURL();
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
-            connection.setRequestProperty("User-Agent", "PhotoViewer/" + currentVersion);
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(10000);
+            connection.setRequestProperty("User-Agent", String.format(AppConstants.USER_AGENT_TEMPLATE, currentVersion));
+            connection.setConnectTimeout(AppConstants.UPDATE_CONNECTION_TIMEOUT_MS);
+            connection.setReadTimeout(AppConstants.UPDATE_READ_TIMEOUT_MS);
             
             int responseCode = connection.getResponseCode();
             if (responseCode == 200) {
@@ -204,14 +259,10 @@ public class UpdateManager {
         try {
             // Basit JSON parsing (JSON library kullanmadan)
             Pattern tagPattern = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
-            Pattern namePattern = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"");
-            Pattern bodyPattern = Pattern.compile("\"body\"\\s*:\\s*\"([^\"]+)\"");
             // PhotoViewer ile başlayan .msi dosyalarını ara
             Pattern urlPattern = Pattern.compile("\"browser_download_url\"\\s*:\\s*\"([^\"]*PhotoViewer[^\"]*\\.msi[^\"]*?)\"");
             
             Matcher tagMatcher = tagPattern.matcher(jsonResponse);
-            Matcher nameMatcher = namePattern.matcher(jsonResponse);
-            Matcher bodyMatcher = bodyPattern.matcher(jsonResponse);
             
             if (tagMatcher.find()) {
                 String latestTag = tagMatcher.group(1);
@@ -235,25 +286,17 @@ public class UpdateManager {
                     }
                 }
                 
-                // PhotoViewer MSI dosyası varsa her zaman güncelleme olarak değerlendir
+                // PhotoViewer MSI dosyası varsa güncelleme mevcut (versiyon karşılaştırması yok)
+                // Çünkü repository sadece yeni sürüm varken public olur
                 if (foundMsiUrl != null) {
                     info.downloadUrl = foundMsiUrl;
-                    info.hasUpdate = true; // MSI varsa her zaman güncelleme var
-                    logger.success("PhotoViewer MSI bulundu - Güncelleme mevcut olarak işaretlendi");
+                    info.hasUpdate = true; // MSI varsa yeni sürüm var demektir
+                    logger.success("PhotoViewer MSI bulundu - Yeni sürüm mevcut: " + latestVersion);
                 } else {
-                    // MSI bulunamadıysa template kullan ama güncelleme yok
-                    info.downloadUrl = DOWNLOAD_URL_TEMPLATE
-                        .replace("{tag}", latestTag)
-                        .replace("{version}", latestVersion);
+                    // MSI bulunamadıysa güncelleme yok
+                    info.downloadUrl = null;
                     info.hasUpdate = false;
-                    logger.warn("PhotoViewer MSI bulunamadı - Güncelleme yok olarak işaretlendi");
-                }
-                
-                if (nameMatcher.find()) {
-                    info.releaseName = nameMatcher.group(1);
-                }
-                if (bodyMatcher.find()) {
-                    info.releaseNotes = bodyMatcher.group(1).replace("\\n", "\n").replace("\\r", "");
+                    logger.info("PhotoViewer MSI bulunamadı - Repository private veya MSI henüz hazır değil");
                 }
                 
                 logger.info("Sürüm kontrolü tamamlandı - Güncel: " + currentVersion + ", Release: " + latestVersion + ", MSI mevcut: " + info.hasUpdate);
@@ -330,81 +373,12 @@ public class UpdateManager {
         
         if (choice == JOptionPane.YES_OPTION) {
             logger.info("Kullanıcı otomatik bildirimden güncellemeyi kabul etti");
-            showUpdateDialog(updateInfo);
+            downloadUpdate(updateInfo);
         } else {
             logger.info("Kullanıcı otomatik bildirimden güncellemeyi reddetti");
         }
     }
-    
-    /**
-     * Detaylı güncelleme dialog'u gösterir
-     */
-    private void showUpdateDialog(UpdateInfo updateInfo) {
-        logger.info("Detaylı güncelleme dialog'u açılıyor");
-        logger.info("Gösterilecek sürüm bilgileri - Güncel: v" + currentVersion + ", Yeni: v" + updateInfo.latestVersion);
-        logger.info("Release adı: " + (updateInfo.releaseName != null ? updateInfo.releaseName : "Belirtilmemiş"));
-        logger.info("İndirme URL'i: " + updateInfo.downloadUrl);
-        
-        JDialog dialog = new JDialog(parentFrame, "PhotoViewer Güncellemesi", true);
-        dialog.setLayout(new BorderLayout());
-        dialog.setSize(500, 400);
-        dialog.setLocationRelativeTo(parentFrame);
-        
-        // Üst panel - Sürüm bilgileri
-        JPanel topPanel = new JPanel(new GridLayout(3, 1, 5, 5));
-        topPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 10, 15));
-        
-        JLabel currentLabel = new JLabel("Güncel Sürüm: v" + currentVersion);
-        currentLabel.setFont(currentLabel.getFont().deriveFont(Font.BOLD));
-        
-        JLabel newLabel = new JLabel("Yeni Sürüm: v" + updateInfo.latestVersion);
-        newLabel.setFont(newLabel.getFont().deriveFont(Font.BOLD));
-        newLabel.setForeground(new Color(0, 150, 0));
-        
-        JLabel nameLabel = new JLabel(updateInfo.releaseName != null ? updateInfo.releaseName : "");
-        
-        topPanel.add(currentLabel);
-        topPanel.add(newLabel);
-        topPanel.add(nameLabel);
-        
-        // Orta panel - Release notes
-        JTextArea notesArea = new JTextArea(updateInfo.releaseNotes != null ? updateInfo.releaseNotes : "Sürüm notları yüklenemedi.");
-        notesArea.setEditable(false);
-        notesArea.setLineWrap(true);
-        notesArea.setWrapStyleWord(true);
-        notesArea.setBackground(dialog.getBackground());
-        notesArea.setBorder(BorderFactory.createTitledBorder("Sürüm Notları"));
-        
-        JScrollPane scrollPane = new JScrollPane(notesArea);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder(0, 15, 10, 15));
-        
-        // Alt panel - Butonlar
-        JPanel buttonPanel = new JPanel(new FlowLayout());
-        buttonPanel.setBorder(BorderFactory.createEmptyBorder(0, 15, 15, 15));
-        
-        JButton downloadButton = new JButton("İndir ve Yükle");
-        downloadButton.addActionListener(e -> {
-            logger.info("Kullanıcı 'İndir ve Yükle' butonunu tıkladı");
-            dialog.dispose();
-            downloadUpdate(updateInfo);
-        });
-        
-        JButton laterButton = new JButton("Daha Sonra");
-        laterButton.addActionListener(e -> {
-            logger.info("Kullanıcı 'Daha Sonra' butonunu tıkladı, güncelleme ertelendi");
-            dialog.dispose();
-        });
-        
-        buttonPanel.add(downloadButton);
-        buttonPanel.add(laterButton);
-        
-        dialog.add(topPanel, BorderLayout.NORTH);
-        dialog.add(scrollPane, BorderLayout.CENTER);
-        dialog.add(buttonPanel, BorderLayout.SOUTH);
-        
-        dialog.setVisible(true);
-    }
-    
+
     /**
      * Güncellemeyi indirir ve yükleme işlemini başlatır
      */
@@ -441,7 +415,7 @@ public class UpdateManager {
         progressDialog.add(panel);
         
         // İptal butonuna listener ekle
-        cancelButton.addActionListener(e -> {
+        cancelButton.addActionListener(_ -> {
             cancelled[0] = true;
             progressDialog.dispose();
             logger.info("Kullanıcı indirme işlemini iptal etti");
@@ -467,8 +441,8 @@ public class UpdateManager {
                         progressDialog.dispose();
                         JOptionPane.showMessageDialog(
                             parentFrame,
-                            "Güncelleme indirilemedi: " + e.getMessage(),
-                            "Hata",
+                            AppMessages.withException(AppMessages.ERROR_UPDATE_DOWNLOAD, e),
+                            AppMessages.TITLE_ERROR,
                             JOptionPane.ERROR_MESSAGE
                         );
                     }
@@ -500,9 +474,9 @@ public class UpdateManager {
         URI uri = URI.create(updateInfo.downloadUrl);
         URL url = uri.toURL();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestProperty("User-Agent", "PhotoViewer/" + currentVersion);
-        connection.setConnectTimeout(10000);
-        connection.setReadTimeout(30000);
+        connection.setRequestProperty("User-Agent", String.format(AppConstants.USER_AGENT_TEMPLATE, currentVersion));
+        connection.setConnectTimeout(AppConstants.UPDATE_CONNECTION_TIMEOUT_MS);
+        connection.setReadTimeout(AppConstants.UPDATE_READ_TIMEOUT_MS);
         
         int responseCode = connection.getResponseCode();
         if (responseCode != 200) {
@@ -511,6 +485,16 @@ public class UpdateManager {
         
         long fileSize = connection.getContentLengthLong();
         logger.info("MSI dosya boyutu: " + (fileSize > 0 ? fileSize + " bytes" : "Bilinmiyor"));
+        
+        // Dosya boyutu kontrolü
+        if (fileSize > 0) {
+            if (fileSize < AppConstants.MIN_MSI_SIZE_BYTES) {
+                throw new IOException("MSI dosyası çok küçük: " + fileSize + " bytes");
+            }
+            if (fileSize > AppConstants.MAX_MSI_SIZE_BYTES) {
+                throw new IOException("MSI dosyası çok büyük: " + (fileSize / (1024 * 1024)) + " MB");
+            }
+        }
         
         SwingUtilities.invokeLater(() -> {
             statusLabel.setText("İndiriliyor: " + msiFile.getName());
@@ -522,7 +506,7 @@ public class UpdateManager {
         try (InputStream inputStream = connection.getInputStream();
              FileOutputStream outputStream = new FileOutputStream(msiFile)) {
             
-            byte[] buffer = new byte[8192];
+            byte[] buffer = new byte[AppConstants.UPDATE_BUFFER_SIZE];
             long totalBytesRead = 0;
             int bytesRead;
             
@@ -535,7 +519,7 @@ public class UpdateManager {
                     final long finalTotalBytes = totalBytesRead;
                     SwingUtilities.invokeLater(() -> {
                         progressBar.setValue(progress);
-                        progressBar.setString(progress + "% (" + formatBytes(finalTotalBytes) + "/" + formatBytes(fileSize) + ")");
+                        progressBar.setString(progress + "% (" + AppUtils.formatBytes(finalTotalBytes) + "/" + AppUtils.formatBytes(fileSize) + ")");
                     });
                 }
                 
@@ -574,84 +558,87 @@ public class UpdateManager {
      * MSI kurulumunu başlatır ve uygulamayı kapatır
      */
     private void startInstallation(File msiFile, JDialog progressDialog) {
-        try {
-            logger.info("MSI kurulumu başlatılıyor: " + msiFile.getAbsolutePath());
-            
-            // Windows Installer komutunu hazırla
-            String[] command = {
-                "msiexec.exe",
-                "/i",
-                msiFile.getAbsolutePath(),
-                "/qb",  // Basic UI ile kurulum
-                "/passive"  // Kullanıcı müdahalesi gerektirmez
-            };
-            
-            logger.info("Kurulum komutu: " + String.join(" ", command));
-            
-            ProcessBuilder processBuilder = new ProcessBuilder(command);
-            processBuilder.directory(msiFile.getParentFile());
-            
-            SwingUtilities.invokeLater(() -> {
-                progressDialog.dispose();
+        logger.info("MSI kurulumu başlatılıyor: " + msiFile.getAbsolutePath() + " (" + (msiFile.length() / (1024 * 1024)) + " MB)");
+        
+        // Progress dialog'u kapat
+        progressDialog.dispose();
+        
+        int choice = JOptionPane.showConfirmDialog(
+            parentFrame,
+            AppMessages.formatUpdateInstallConfirm((int)(msiFile.length() / (1024 * 1024))),
+            AppMessages.TITLE_CONFIRM,
+            JOptionPane.YES_NO_OPTION,
+            JOptionPane.QUESTION_MESSAGE
+        );
+
+        if (choice == JOptionPane.YES_OPTION) {
+            try {
+                logger.info("Standart MSI kurulum komutu çalıştırılıyor...");
                 
-                String message = "PhotoViewer güncelleme kurulumu başlatıldı.\n\n" +
-                               "Kurulum otomatik olarak devam edecek.\n" +
-                               "Eski uygulama şimdi kapatılacak.\n\n" +
-                               "Kurulum tamamlandıktan sonra yeni PhotoViewer'ı başlatabilirsiniz.";
+                // Standart MSI kurulum komutunu kullan
+                String[] command = new String[AppConstants.MSI_INSTALL_COMMAND_STANDARD.length + 1];
+                System.arraycopy(AppConstants.MSI_INSTALL_COMMAND_STANDARD, 0, command, 0, AppConstants.MSI_INSTALL_COMMAND_STANDARD.length);
+                command[command.length - 1] = msiFile.getAbsolutePath();
                 
-                JOptionPane.showMessageDialog(
+                ProcessBuilder pb = new ProcessBuilder(command);
+                logger.info("ProcessBuilder komutu: " + String.join(" ", pb.command()));
+                
+                // Kurulum başlat
+                pb.start();
+                
+                logger.info("MSI kurulum süreci başlatıldı - Uygulama " + AppConstants.UPDATE_EXIT_DELAY_SECONDS + " saniye sonra kapanacak");
+                
+                // Standart bekleme süresi ile güvenli şekilde uygulamayı kapat
+                Timer timer = new Timer(AppConstants.UPDATE_EXIT_DELAY_SECONDS * 1000, _ -> {
+                    logger.info("Uygulama kapatılıyor - MSI kurulumu devam ediyor");
+                    SwingUtilities.invokeLater(() -> {
+                        try {
+                            if (parentFrame != null) {
+                                parentFrame.dispose();
+                            }
+                            System.exit(0);
+                        } catch (Exception ex) {
+                            logger.error("Uygulama kapatma hatası", ex);
+                        }
+                    });
+                });
+                timer.setRepeats(false);
+                
+                SwingUtilities.invokeLater(() -> {
+                    JOptionPane.showMessageDialog(
+                        parentFrame,
+                        AppMessages.formatMsiInstallStarted(AppConstants.UPDATE_EXIT_DELAY_SECONDS),
+                        AppMessages.TITLE_UPDATE,
+                        JOptionPane.INFORMATION_MESSAGE
+                    );
+                    timer.start();
+                });
+                
+            } catch (Exception e) {
+                logger.error("MSI kurulum başlatma hatası", e);
+                
+                // Hata durumunda manuel kurulum seçeneği sun
+                int manualChoice = JOptionPane.showConfirmDialog(
                     parentFrame,
-                    message,
-                    "Kurulum Başlatıldı",
-                    JOptionPane.INFORMATION_MESSAGE
-                );
-            });
-            
-            // Kurulumu başlat
-            Process process = processBuilder.start();
-            logger.success("MSI kurulum süreci başlatıldı - PID: " + process.pid());
-            
-            // Kurulum başladığına emin olduktan sonra uygulamayı kapat
-            Thread.sleep(2000); // 2 saniye bekle ki kurulum başlasın
-            
-            logger.info("Kurulum başladı, eski uygulama kapatılıyor...");
-            
-            SwingUtilities.invokeLater(() -> {
-                try {
-                    // Tüm pencereleri kapat
-                    if (parentFrame != null) {
-                        parentFrame.dispose();
-                    }
-                    // JVM'i kapat
-                    System.exit(0);
-                } catch (Exception e) {
-                    logger.error("Uygulama kapatma hatası", e);
-                }
-            });
-            
-        } catch (Exception e) {
-            logger.error("MSI kurulum hatası", e);
-            SwingUtilities.invokeLater(() -> {
-                progressDialog.dispose();
-                JOptionPane.showMessageDialog(
-                    parentFrame,
-                    "Kurulum başlatılamadı: " + e.getMessage() + "\n\n" +
-                    "Lütfen MSI dosyasını manuel olarak çalıştırın:\n" + msiFile.getAbsolutePath(),
-                    "Kurulum Hatası",
+                    AppMessages.withException(AppMessages.ERROR_UPDATE_INSTALL, e) + "\n\n" +
+                    AppMessages.formatMsiManualInstall(msiFile.getAbsolutePath()),
+                    AppMessages.TITLE_ERROR,
+                    JOptionPane.YES_NO_OPTION,
                     JOptionPane.ERROR_MESSAGE
                 );
-            });
+                
+                if (manualChoice == JOptionPane.YES_OPTION) {
+                    try {
+                        // Dosya gezginini aç
+                        Desktop.getDesktop().open(msiFile.getParentFile());
+                    } catch (Exception ex) {
+                        logger.error("Dosya gezgini açma hatası", ex);
+                    }
+                }
+            }
+        } else {
+            logger.info("Kullanıcı MSI kurulumunu iptal etti");
         }
-    }
-    
-    /**
-     * Byte sayısını okunabilir formata çevirir
-     */
-    private String formatBytes(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        int exp = (int) (Math.log(bytes) / Math.log(1024));
-        String pre = "KMGTPE".charAt(exp - 1) + "";
-        return String.format("%.1f %sB", bytes / Math.pow(1024, exp), pre);
     }
     
     /**
@@ -659,9 +646,8 @@ public class UpdateManager {
      */
     private static class UpdateInfo {
         String latestVersion;
+        @SuppressWarnings("unused") // GitHub API'den gelen veri için gerekli
         String tagName;
-        String releaseName;
-        String releaseNotes;
         String downloadUrl;
         String errorMessage;
         boolean hasUpdate;

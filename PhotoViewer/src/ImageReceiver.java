@@ -13,12 +13,16 @@ public class ImageReceiver {
         
         try {
             if (length > 0) {
-                // If the image is large, stream to a temp file to avoid OOM
-                final int STREAM_TO_FILE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
-                if (length > STREAM_TO_FILE_THRESHOLD) {
+                // Buffer boyutunu dinamik olarak optimize et
+                final int OPTIMAL_BUFFER_SIZE = Math.min(
+                    AppConstants.OPTIMAL_BUFFER_SIZE_MAX, 
+                    Math.max(AppConstants.OPTIMAL_BUFFER_SIZE_MIN, length / 100)
+                );
+                
+                if (length > AppConstants.STREAM_TO_FILE_THRESHOLD) {
                     tempFile = File.createTempFile("received_image_", ".tmp");
                     try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                        byte[] buffer = new byte[8192];
+                        byte[] buffer = new byte[OPTIMAL_BUFFER_SIZE];
                         int remaining = length;
                         while (remaining > 0) {
                             int toRead = Math.min(buffer.length, remaining);
@@ -31,7 +35,7 @@ public class ImageReceiver {
                     image = ImageIO.read(tempFile);
                 } else {
                     int remaining = length;
-                    byte[] buffer = new byte[8192];
+                    byte[] buffer = new byte[OPTIMAL_BUFFER_SIZE];
                     while (remaining > 0) {
                         int toRead = Math.min(buffer.length, remaining);
                         int read = in.read(buffer, 0, toRead);

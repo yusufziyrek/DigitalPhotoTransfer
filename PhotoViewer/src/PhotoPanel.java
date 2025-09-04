@@ -17,17 +17,17 @@ import javax.imageio.ImageIO;
 public class PhotoPanel extends JPanel {
     private static final long serialVersionUID = 1L;
     private transient BufferedImage image = null;
-    private String info = "Wyndham Grand Istanbul Europe";
+    private String info = AppConstants.DEFAULT_INFO_MESSAGE;
     private JFrame parentFrame;
 
     // Clock & date overlay
     private volatile String timeText = "";
     private volatile String dateText = "";
-    private final transient DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
-    private final transient DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    private final transient DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern(AppConstants.TIME_FORMAT_PATTERN);
+    private final transient DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern(AppConstants.DATE_FORMAT_PATTERN);
     // Bigger, clearer fonts: large for time, smaller for date (increased per user request)
-    private final Font timeFont = new Font("SansSerif", Font.PLAIN, 45);
-    private final Font dateFont = new Font("SansSerif", Font.PLAIN, 20);
+    private final Font timeFont = new Font("SansSerif", Font.PLAIN, AppConstants.TIME_FONT_SIZE);
+    private final Font dateFont = new Font("SansSerif", Font.PLAIN, AppConstants.DATE_FONT_SIZE);
     private Timer clockTimer;
     private boolean showClock = true; // can add setter if needed
 
@@ -38,7 +38,6 @@ public class PhotoPanel extends JPanel {
     private Cursor defaultCursor;
     private Cursor blankCursor;
     private Timer hideCursorTimer;
-    private final int CURSOR_IDLE_MS = 3000; // hide after 3 seconds
     private volatile boolean cursorHidden = false;
 
     // Sağ tık menüsü ve çıkış seçeneği
@@ -56,7 +55,7 @@ public class PhotoPanel extends JPanel {
     private void initializeComponents() {
         // Manuel seçim menü öğesi
         JMenuItem manualItem = new JMenuItem("Manuel Seç");
-        manualItem.addActionListener(e -> {
+        manualItem.addActionListener(_ -> {
             if (parentFrame == null) return;
             JFileChooser fc = PhotoViewerServer.createImageFileChooser(parentFrame);
             int r = fc.showOpenDialog(parentFrame);
@@ -70,15 +69,15 @@ public class PhotoPanel extends JPanel {
                         try {
                             File configFile = PhotoViewerServer.getConfigFile();
                             Properties p = PhotoViewerServer.loadProperties(configFile);
-                            p.setProperty("mode", "MANUAL");
-                            p.setProperty("savedImagePath", sel.getAbsolutePath());
+                            p.setProperty(AppConstants.CONFIG_MODE_KEY, AppConstants.MODE_MANUAL);
+                            p.setProperty(AppConstants.CONFIG_SAVED_IMAGE_PATH_KEY, sel.getAbsolutePath());
                             PhotoViewerServer.saveProperties(configFile, p);
                         } catch (Exception ignore) {}
                     } else {
-                        JOptionPane.showMessageDialog(parentFrame, "Resim yüklenemedi.", "Hata", JOptionPane.ERROR_MESSAGE);
+                        JOptionPane.showMessageDialog(parentFrame, AppMessages.ERROR_IMAGE_LOAD, AppMessages.TITLE_ERROR, JOptionPane.ERROR_MESSAGE);
                     }
                 } catch (IOException ex) {
-                    JOptionPane.showMessageDialog(parentFrame, "Resim yüklenirken hata: " + ex.getMessage(), "Hata", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(parentFrame, AppMessages.withException(AppMessages.ERROR_IMAGE_LOAD, ex), AppMessages.TITLE_ERROR, JOptionPane.ERROR_MESSAGE);
                 }
             }
         });
@@ -86,7 +85,7 @@ public class PhotoPanel extends JPanel {
 
         // Yeni: saat göster/gizle toggle as a simple menu item (no checkbox)
         updateClockToggleText();
-        clockToggleItem.addActionListener(e -> {
+        clockToggleItem.addActionListener(_ -> {
             showClock = !showClock;
             updateClockToggleText();
             repaint();
@@ -95,7 +94,7 @@ public class PhotoPanel extends JPanel {
 
         popupMenu.addSeparator();
         popupMenu.add(exitItem);
-        exitItem.addActionListener(e -> {
+        exitItem.addActionListener(_ -> {
             if (parentFrame != null) {
                 parentFrame.dispose();
                 System.exit(0);
@@ -134,7 +133,7 @@ public class PhotoPanel extends JPanel {
     private void startClockTimer() {
         // Başlangıçta saat & tarih metinlerini güncelle ve timer başlat
         updateTimeText();
-        clockTimer = new Timer(1000, e -> {
+        clockTimer = new Timer(AppConstants.CLOCK_UPDATE_INTERVAL_MS, _ -> {
             updateTimeText();
             // Her saniye güncelliyoruz (dakika değişiminde de repaint yeterli olur)
             repaint();
@@ -149,7 +148,7 @@ public class PhotoPanel extends JPanel {
         blankCursor = Toolkit.getDefaultToolkit().createCustomCursor(
             new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB), 
             new Point(0, 0), "blank");
-        hideCursorTimer = new Timer(CURSOR_IDLE_MS, e -> {
+        hideCursorTimer = new Timer(AppConstants.CURSOR_IDLE_MS, _ -> {
             SwingUtilities.invokeLater(() -> {
                 setCursor(blankCursor);
                 cursorHidden = true;
@@ -210,11 +209,11 @@ public class PhotoPanel extends JPanel {
             if (hideCursorTimer != null) hideCursorTimer.restart();
 
             // ensure dark background while showing images (avoids light strips)
-            setBackground(Color.BLACK);
+            setBackground(AppConstants.IMAGE_BACKGROUND_COLOR);
         } else {
             // if clearing the image, stop hide timer and restore info-bg
             if (hideCursorTimer != null) hideCursorTimer.stop();
-            setBackground(new Color(230, 230, 230));
+            setBackground(AppConstants.INFO_BACKGROUND_COLOR);
         }
         repaint();
     }
@@ -235,19 +234,19 @@ public class PhotoPanel extends JPanel {
             if (hideCursorTimer != null) hideCursorTimer.restart();
 
             // ensure dark background while showing images (avoids light strips)
-            setBackground(Color.BLACK);
+            setBackground(AppConstants.IMAGE_BACKGROUND_COLOR);
             
             // Zamanlayıcıyı başlat
             if (durationSeconds > 0) {
                 // Java Timer maksimum Integer.MAX_VALUE milisaniye destekler
                 // Uzun süreler için özel işlem gerekebilir
                 long millis = Math.min(durationSeconds * 1000L, Integer.MAX_VALUE);
-                autoReturnTimer = new Timer((int) millis, e -> {
+                autoReturnTimer = new Timer((int) millis, _ -> {
                     if (defaultImg != null) {
                         setImage(defaultImg);
                         System.out.println("Otomatik olarak varsayılan resme döndü.");
                     } else {
-                        setInfo("Wyndham Grand Istanbul Europe");
+                        setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
                         System.out.println("Otomatik olarak bilgi ekranına döndü.");
                     }
                 });
@@ -260,7 +259,7 @@ public class PhotoPanel extends JPanel {
         } else {
             // if clearing the image, stop hide timer and restore info-bg
             if (hideCursorTimer != null) hideCursorTimer.stop();
-            setBackground(new Color(230, 230, 230));
+            setBackground(AppConstants.INFO_BACKGROUND_COLOR);
         }
         repaint();
     }
@@ -335,7 +334,7 @@ public class PhotoPanel extends JPanel {
 
             // Saat + tarih bindirmesini sağ üst köşeye çiz
             if (showClock && timeText != null && !timeText.isEmpty()) {
-                int margin = 18; // köşeden uzaklık
+                int margin = AppConstants.CLOCK_MARGIN; // köşeden uzaklık
 
                 // Time
                 g2d.setFont(timeFont);
@@ -359,8 +358,7 @@ public class PhotoPanel extends JPanel {
                 int tyDate = tyTime + 6 + dateH; // small gap between lines
 
                 // Draw main text in blue (no shadow)
-                Color mainBlue = new Color(30, 144, 255); // DodgerBlue
-                g2d.setColor(mainBlue);
+                g2d.setColor(AppConstants.CLOCK_COLOR);
                 g2d.setFont(timeFont);
                 g2d.drawString(timeText, txTime, tyTime);
                 g2d.setFont(dateFont);
@@ -368,14 +366,33 @@ public class PhotoPanel extends JPanel {
             }
 
         } else {
-            setBackground(new Color(230, 230, 230));
-            g.setColor(Color.DARK_GRAY);
-            g.setFont(new Font("Arial", Font.BOLD, 48));
+            setBackground(AppConstants.INFO_BACKGROUND_COLOR);
+            g.setColor(AppConstants.INFO_TEXT_COLOR);
+            g.setFont(new Font("Arial", Font.BOLD, AppConstants.INFO_FONT_SIZE));
             FontMetrics fm = g.getFontMetrics();
             int textWidth = fm.stringWidth(info);
             int x = (getWidth() - textWidth) / 2;
             int y = getHeight() / 2;
             g.drawString(info, x, y);
+        }
+    }
+
+    /**
+     * Component kapatıldığında timer'ları temizler (Memory leak prevention)
+     */
+    public void dispose() {
+        // Tüm timer'ları güvenli şekilde durdur
+        if (clockTimer != null && clockTimer.isRunning()) {
+            clockTimer.stop();
+            clockTimer = null;
+        }
+        if (autoReturnTimer != null && autoReturnTimer.isRunning()) {
+            autoReturnTimer.stop();
+            autoReturnTimer = null;
+        }
+        if (hideCursorTimer != null && hideCursorTimer.isRunning()) {
+            hideCursorTimer.stop();
+            hideCursorTimer = null;
         }
     }
 }

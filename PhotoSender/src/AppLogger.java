@@ -12,10 +12,14 @@ import java.time.format.DateTimeFormatter;
  * APPDATA klasörü altında tarihli log dosyaları oluşturur
  */
 public class AppLogger {
+    // Constants for consistency with PhotoViewer
+    private static final String LOG_TIMESTAMP_PATTERN = "yyyy-MM-dd HH:mm:ss.SSS";
+    private static final String LOG_FILE_DATE_PATTERN = "yyyy-MM-dd";
+    
     private final String appName;
     private final File logFile;
-    private final DateTimeFormatter timestampFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-    private final DateTimeFormatter fileFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private final DateTimeFormatter timestampFormat = DateTimeFormatter.ofPattern(LOG_TIMESTAMP_PATTERN);
+    private final DateTimeFormatter fileFormat = DateTimeFormatter.ofPattern(LOG_FILE_DATE_PATTERN);
     
     /**
      * AppLogger constructor
@@ -26,7 +30,7 @@ public class AppLogger {
         this.logFile = createLogFile();
         
         // Başlangıç log'u
-        log("INFO", "Uygulama başlatıldı - " + appName + " v1.0.4");
+        log("INFO", "Uygulama başlatıldı - " + appName + " v" + PhotoSenderApp.VERSION);
     }
     
     /**

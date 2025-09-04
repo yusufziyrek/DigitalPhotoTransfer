@@ -14,8 +14,8 @@ import java.time.format.DateTimeFormatter;
 public class AppLogger {
     private final String appName;
     private final File logFile;
-    private final DateTimeFormatter timestampFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-    private final DateTimeFormatter fileFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private final DateTimeFormatter timestampFormat = DateTimeFormatter.ofPattern(AppConstants.LOG_TIMESTAMP_PATTERN);
+    private final DateTimeFormatter fileFormat = DateTimeFormatter.ofPattern(AppConstants.LOG_FILE_DATE_PATTERN);
     
     /**
      * AppLogger constructor

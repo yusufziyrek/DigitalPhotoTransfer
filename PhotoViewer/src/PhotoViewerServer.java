@@ -15,12 +15,14 @@ import java.net.URISyntaxException;
 import java.nio.file.Path;
 
 public class PhotoViewerServer {
-    private static final String VERSION = "1.0.5";
     private static final AppLogger logger = new AppLogger("PhotoViewer");
     private static UpdateManager updateManager = null;
     
+    // Properties dosyası thread-safe erişimi için kilit
+    private static final Object CONFIG_LOCK = new Object();
+    
     public static void main(String[] args) {
-        int port = 5000; // Dinlenecek port
+        int port = AppConstants.DEFAULT_PORT; // Dinlenecek port
         JFrame frame = new JFrame();
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setUndecorated(true);
@@ -31,11 +33,17 @@ public class PhotoViewerServer {
         frame.setContentPane(photoPanel);
         photoPanel.setParentFrame(frame);
 
+        // UpdateManager'ı erken başlat (UI oluşturulduktan hemen sonra)
+        logger.info("UpdateManager başlatılıyor...");
+        updateManager = new UpdateManager(AppConstants.VERSION, frame, logger);
+
         // ESC ile kapatma
         frame.addKeyListener(new java.awt.event.KeyAdapter() {
             @Override
             public void keyPressed(java.awt.event.KeyEvent e) {
                 if (e.getKeyCode() == java.awt.event.KeyEvent.VK_ESCAPE) {
+                    // Timer'ları temizle
+                    photoPanel.dispose();
                     frame.dispose();
                     System.exit(0);
                 }
@@ -51,9 +59,9 @@ public class PhotoViewerServer {
 
         Properties props = loadProperties(configFile);
 
-        String mode = props.getProperty("mode", "PROMPT"); // PROMPT, MANUAL, AUTO
-        String savedImagePath = props.getProperty("savedImagePath", "");
-        String autoFolder = props.getProperty("autoFolder", "");
+        String mode = props.getProperty(AppConstants.CONFIG_MODE_KEY, AppConstants.MODE_PROMPT); // PROMPT, MANUAL, AUTO
+        String savedImagePath = props.getProperty(AppConstants.CONFIG_SAVED_IMAGE_PATH_KEY, "");
+        String autoFolder = props.getProperty(AppConstants.CONFIG_AUTO_FOLDER_KEY, "");
 
     // If there is no config (first run), ask user once at first start and save it.
     if (!configFile.exists()) {
@@ -65,8 +73,8 @@ public class PhotoViewerServer {
                     BufferedImage img = ImageIO.read(sel);
                     if (img != null) {
                         defaultImage = img;
-                        props.setProperty("mode", "MANUAL");
-                        props.setProperty("savedImagePath", sel.getAbsolutePath());
+                        props.setProperty(AppConstants.CONFIG_MODE_KEY, AppConstants.MODE_MANUAL);
+                        props.setProperty(AppConstants.CONFIG_SAVED_IMAGE_PATH_KEY, sel.getAbsolutePath());
                         saveProperties(configFile, props);
                     } else {
                         // leave defaultImage null and continue with existing flow
@@ -75,12 +83,12 @@ public class PhotoViewerServer {
                 }
             }
             // reload savedImagePath in case it was written
-            savedImagePath = props.getProperty("savedImagePath", "");
-            mode = props.getProperty("mode", mode);
+            savedImagePath = props.getProperty(AppConstants.CONFIG_SAVED_IMAGE_PATH_KEY, "");
+            mode = props.getProperty(AppConstants.CONFIG_MODE_KEY, mode);
         }
 
         // Eğer kaydedilmiş manuel resim yolu varsa yüklemeyi dene
-        if ("MANUAL".equalsIgnoreCase(mode) && !savedImagePath.isEmpty()) {
+        if (AppConstants.MODE_MANUAL.equalsIgnoreCase(mode) && !savedImagePath.isEmpty()) {
             File f = new File(savedImagePath);
             if (f.exists()) {
                 try { defaultImage = ImageIO.read(f); } catch (IOException ignored) {}
@@ -88,7 +96,7 @@ public class PhotoViewerServer {
         }
 
         // Eğer AUTO mod ise tarama yap
-        if (defaultImage == null && "AUTO".equalsIgnoreCase(mode)) {
+        if (defaultImage == null && AppConstants.MODE_AUTO.equalsIgnoreCase(mode)) {
             File folderToScan = autoFolder.isEmpty() ? appDir : new File(autoFolder);
             System.out.println("AUTO scan: primary -> " + folderToScan.getAbsolutePath());
             defaultImage = scanForDefaultImage(folderToScan);
@@ -108,45 +116,53 @@ public class PhotoViewerServer {
         }
 
         // PROMPT: do not force repeated chooser; if still no default, show info
-        if (defaultImage == null && "PROMPT".equalsIgnoreCase(mode)) {
-            photoPanel.setInfo("Wyndham Grand Istanbul Europe");
+        if (defaultImage == null && AppConstants.MODE_PROMPT.equalsIgnoreCase(mode)) {
+            photoPanel.setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
         }
 
         // Eğer halen defaultImage null ise, file chooser fallback veya bilgi göster
-        if (defaultImage == null && !"MANUAL".equalsIgnoreCase(mode)) {
+        if (defaultImage == null && !AppConstants.MODE_MANUAL.equalsIgnoreCase(mode)) {
             // otomatik modda bulunamadıysa fallback bilgi
-            photoPanel.setInfo("Wyndham Grand Istanbul Europe");
+            photoPanel.setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
         } else if (defaultImage != null) {
             photoPanel.setImage(defaultImage);
         } else {
             // MANUAL modu ama kaydedilmiş yok -> gösterici ile manuel seçim
-            JFileChooser fileChooser = createImageFileChooser(frame);
-            int result = fileChooser.showOpenDialog(frame);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File selectedFile = fileChooser.getSelectedFile();
-                try {
-                    defaultImage = ImageIO.read(selectedFile);
-                    if (defaultImage != null) {
-                        photoPanel.setImage(defaultImage);
-                    } else {
-                        photoPanel.setInfo("Fotoğraf yüklenemedi.");
+            try {
+                JFileChooser fileChooser = createImageFileChooser(frame);
+                int result = fileChooser.showOpenDialog(frame);
+                if (result == JFileChooser.APPROVE_OPTION) {
+                    File selectedFile = fileChooser.getSelectedFile();
+                    try {
+                        defaultImage = ImageIO.read(selectedFile);
+                        if (defaultImage != null) {
+                            photoPanel.setImage(defaultImage);
+                            logger.info("Manuel resim seçimi başarılı: " + selectedFile.getName());
+                        } else {
+                            photoPanel.setInfo(AppConstants.PHOTO_LOAD_ERROR_MESSAGE);
+                            logger.warn("Seçilen dosya okunamadı: " + selectedFile.getName());
+                        }
+                    } catch (IOException ex) {
+                        photoPanel.setInfo(AppConstants.PHOTO_LOAD_ERROR_MESSAGE);
+                        logger.error("Resim yükleme hatası: " + ex.getMessage());
                     }
-                } catch (IOException ex) {
-                    photoPanel.setInfo("Fotoğraf yüklenemedi.");
+                } else {
+                    photoPanel.setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
+                    logger.info("Kullanıcı resim seçimini iptal etti");
                 }
-            } else {
-                photoPanel.setInfo("Wyndham Grand Istanbul Europe");
+            } catch (Exception ex) {
+                photoPanel.setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
+                logger.error("FileChooser hatası: " + ex.getMessage());
             }
         }
 
         frame.setVisible(true);
         logger.info("PhotoViewer UI başlatıldı, port: " + port);
 
-        // UpdateManager'ı başlat ve otomatik güncelleme kontrolü yap
-        updateManager = new UpdateManager(VERSION, frame);
-        updateManager.checkForUpdatesOnStartup();
+        // UpdateManager otomatik kontrolü kaldırıldı - sadece file chooser'da manuel kontrol
+        // updateManager.checkForUpdatesOnStartup(); // Commented out
 
-    try (ServerSocket serverSocket = new ServerSocket(port)) {
+        try (ServerSocket serverSocket = new ServerSocket(port)) {
             logger.success("Sunucu başarıyla başlatıldı - Port: " + port);
             System.out.println("Sunucu dinleniyor: " + port);
             while (true) {
@@ -156,14 +172,14 @@ public class PhotoViewerServer {
                     System.out.println("Bağlantı alındı: " + clientSocket.getInetAddress());
             InputStream rawIn = clientSocket.getInputStream();
             // Use PushbackInputStream so we can unread one byte if needed when parsing lines
-            PushbackInputStream in = new PushbackInputStream(rawIn, 8192);
+            PushbackInputStream in = new PushbackInputStream(rawIn, AppConstants.PUSHBACK_BUFFER_SIZE);
             // Ensure we don't block forever waiting for data
-            clientSocket.setSoTimeout(10000); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşsin
+            clientSocket.setSoTimeout(AppConstants.SOCKET_TIMEOUT_MS); // PhotoSenderApp READ_TIMEOUT_MS ile eşleşsin
             // Komut satırını oku (ilk satır) - format: SHOW_DEFAULT OR SEND_PHOTO:<length>
                     String command = readAsciiLine(in);
                     logger.info("Komut alındı: " + command + " (Kaynak: " + clientIP + ")");
                     System.out.println("Komut alındı: " + command);
-                    if (command != null && command.equals("SHOW_DEFAULT")) {
+                    if (command != null && command.equals(AppConstants.COMMAND_SHOW_DEFAULT)) {
                         // Default fotoğrafı göster
                         if (defaultImage != null) {
                             logger.success("Default fotoğraf gösteriliyor");
@@ -171,9 +187,9 @@ public class PhotoViewerServer {
                             photoPanel.setImage(defaultImage);
                         } else {
                             logger.warn("Default fotoğraf bulunamadı");
-                            photoPanel.setInfo("Default fotoğraf yok.");
+                            photoPanel.setInfo(AppConstants.NO_DEFAULT_PHOTO_MESSAGE);
                         }
-                    } else if (command != null && command.startsWith("SEND_PHOTO_WITH_TIMER:")) {
+                    } else if (command != null && command.startsWith(AppConstants.COMMAND_SEND_PHOTO_WITH_TIMER)) {
                         // Yeni protokol: SEND_PHOTO_WITH_TIMER:boyut:süre
                         System.out.println("Zamanlı fotoğraf verisi alınıyor...");
                         String[] parts = command.split(":", 3);
@@ -187,11 +203,7 @@ public class PhotoViewerServer {
                                 
                                 if (image != null) {
                                     photoPanel.setImageWithTimer(image, durationSeconds, defaultImage);
-                                    long days = durationSeconds / 86400;
-                                    long hours = (durationSeconds % 86400) / 3600;
-                                    long minutes = (durationSeconds % 3600) / 60;
-                                    long seconds = durationSeconds % 60;
-                                    String durStr = String.format("%d gün, %d saat, %d dakika, %d saniye", days, hours, minutes, seconds);
+                                    String durStr = AppUtils.formatDuration(durationSeconds);
                                     logger.success("Zamanlı fotoğraf alındı: " + durStr + " gösterilecek (Kaynak: " + clientIP + ")");
                                     System.out.println("Zamanlı fotoğraf alındı: " + durStr + " gösterilecek");
                                     
@@ -199,7 +211,7 @@ public class PhotoViewerServer {
                                     try {
                                         OutputStream out = clientSocket.getOutputStream();
                                         BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(out, "US-ASCII"));
-                                        bw.write("OK\n");
+                                        bw.write(AppConstants.RESPONSE_OK);
                                         bw.flush();
                                     } catch (Exception ex) {
                                         logger.error("ACK gönderilemedi", ex);
@@ -211,7 +223,7 @@ public class PhotoViewerServer {
                                     try {
                                         OutputStream out = clientSocket.getOutputStream();
                                         BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(out, "US-ASCII"));
-                                        bw.write("ERR\n");
+                                        bw.write(AppConstants.RESPONSE_ERROR);
                                         bw.flush();
                                     } catch (Exception ex) {
                                         logger.error("ERR gönderilemedi", ex);
@@ -227,7 +239,7 @@ public class PhotoViewerServer {
                         // Beklenen format: SEND_PHOTO:<length>\n followed by exactly <length> bytes
                         System.out.println("Fotoğraf verisi alınıyor...");
                         int length = -1;
-                        if (command != null && command.startsWith("SEND_PHOTO:")) {
+                        if (command != null && command.startsWith(AppConstants.COMMAND_SEND_PHOTO)) {
                             try {
                                 String[] sp = command.split(":", 2);
                                 length = Integer.parseInt(sp[1]);
@@ -248,7 +260,7 @@ public class PhotoViewerServer {
                             if (defaultImage != null) {
                                 photoPanel.setImage(defaultImage);
                             } else {
-                                photoPanel.setInfo("Geçersiz veya eksik fotoğraf verisi.");
+                                photoPanel.setInfo(AppConstants.INVALID_PHOTO_DATA_MESSAGE);
                             }
                         }
 
@@ -256,7 +268,7 @@ public class PhotoViewerServer {
                         try {
                             OutputStream out = clientSocket.getOutputStream();
                             BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(out, "US-ASCII"));
-                            String reply = (image != null) ? "OK\n" : "ERR\n";
+                            String reply = (image != null) ? AppConstants.RESPONSE_OK : AppConstants.RESPONSE_ERROR;
                             bw.write(reply);
                             bw.flush();
                         } catch (Exception ex) {
@@ -308,23 +320,27 @@ public class PhotoViewerServer {
     }
 
     public static Properties loadProperties(File configFile) {
-        Properties p = new Properties();
-        if (configFile.exists()) {
-            try (FileInputStream fis = new FileInputStream(configFile)) {
-                p.load(fis);
-            } catch (IOException ignored) {}
+        synchronized (CONFIG_LOCK) {
+            Properties p = new Properties();
+            if (configFile.exists()) {
+                try (FileInputStream fis = new FileInputStream(configFile)) {
+                    p.load(fis);
+                } catch (IOException ignored) {}
+            }
+            return p;
         }
-        return p;
     }
 
     public static void saveProperties(File configFile, Properties p) {
-        try {
-            File parent = configFile.getAbsoluteFile().getParentFile();
-            if (parent != null && !parent.exists()) parent.mkdirs();
-            try (FileOutputStream fos = new FileOutputStream(configFile)) {
-                p.store(fos, "PhotoViewer settings");
-            }
-        } catch (IOException ignored) {}
+        synchronized (CONFIG_LOCK) {
+            try {
+                File parent = configFile.getAbsoluteFile().getParentFile();
+                if (parent != null && !parent.exists()) parent.mkdirs();
+                try (FileOutputStream fos = new FileOutputStream(configFile)) {
+                    p.store(fos, AppConstants.CONFIG_COMMENT);
+                }
+            } catch (IOException ignored) {}
+        }
     }
 
     /**
@@ -357,14 +373,9 @@ public class PhotoViewerServer {
             if (list == null) return null;
             // First pass: files in this directory
             for (File f : list) {
-                if (f.isFile()) {
-                    String name = f.getName().toLowerCase();
-                    if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp")) {
-                        try {
-                            BufferedImage img = ImageIO.read(f);
-                            if (img != null) return img;
-                        } catch (IOException ignored) {}
-                    }
+                if (f.isFile() && AppUtils.isSupportedImageFile(f.getName())) {
+                    BufferedImage img = AppUtils.readImageSafely(f);
+                    if (img != null) return img;
                 }
             }
             // Second pass: recurse into subdirectories
@@ -380,14 +391,23 @@ public class PhotoViewerServer {
 
     public static JFileChooser createImageFileChooser(JFrame frame) {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Photo Viewer - Wyndham Grand Istanbul Europe - "+ "v" +VERSION);
+        fileChooser.setDialogTitle(AppConstants.APP_TITLE + " - v" + AppConstants.VERSION);
         fileChooser.setAcceptAllFileFilterUsed(false);
+        
+        // File chooser açıldığında otomatik güncelleme kontrolü başlat
+        if (updateManager != null && updateManager.isReady()) {
+            updateManager.checkForUpdatesOnFileChooser();
+        }
+        
         fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileFilter() {
             @Override
             public boolean accept(File f) {
                 if (f.isDirectory()) return true;
                 String name = f.getName().toLowerCase();
-                return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".bmp");
+                for (String ext : AppConstants.SUPPORTED_IMAGE_EXTENSIONS) {
+                    if (name.endsWith(ext)) return true;
+                }
+                return false;
             }
             @Override
             public String getDescription() {
@@ -422,8 +442,8 @@ public class PhotoViewerServer {
             "5) Sorun Giderme:\n" +
             "   - Eğer resim gösterilmiyorsa gönderici ile READ_TIMEOUT veya header formatını kontrol edin.\n" +
             "   - photoviewer.properties dosyası bulunamazsa uygulama %APPDATA% veya kullanıcı dizinine yazmaya çalışır.\n\n" +
-            "İletişim: yusufziyrek1@gmail.com\n" +
-            "Sürüm: " + VERSION + "\n";
+            "İletişim: " + AppConstants.CONTACT_EMAIL + "\n" +
+            "Sürüm: " + AppConstants.VERSION + "\n";
                 JTextArea ta = new JTextArea(usage);
                 ta.setEditable(false);
                 ta.setLineWrap(true);
@@ -441,13 +461,13 @@ public class PhotoViewerServer {
         aboutBtn.addActionListener(new java.awt.event.ActionListener() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent ev) {
-                String license = "Bu yazılım Yusuf Ziyrek'e aittir.\n" +
+                String license = AppConstants.COPYRIGHT + "\n" +
                         "İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.\n" +
-                        "Tüm hakları saklıdır. © 2025 Yusuf Ziyrek\n\n" +
-                        "Sürüm: " + VERSION + "\n\n" +
+                        "Tüm hakları saklıdır. " + AppConstants.COPYRIGHT + "\n\n" +
+                        "Sürüm: " + AppConstants.VERSION + "\n\n" +
                         "Kısa yardım: Fotoğraf seçmek için dosya seçiciden bir resim seçin (jpg, jpeg, png, bmp).\n" +
                         "Tam ekrandayken sağ tık veya ESC ile çıkabilirsiniz.\n\n" +
-                        "İletişim: yusufziyrek1@gmail.com";
+                        "İletişim: " + AppConstants.CONTACT_EMAIL;
                 JOptionPane.showMessageDialog(frame, license, "Hakkında / Lisans", JOptionPane.INFORMATION_MESSAGE);
             }
         });
@@ -458,7 +478,7 @@ public class PhotoViewerServer {
         updateBtn.addActionListener(new java.awt.event.ActionListener() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent ev) {
-                if (updateManager != null) {
+                if (updateManager != null && updateManager.isReady()) {
                     updateManager.checkForUpdatesManual();
                 } else {
                     JOptionPane.showMessageDialog(frame, 

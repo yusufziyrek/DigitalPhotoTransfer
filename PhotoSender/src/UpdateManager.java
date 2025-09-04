@@ -1,5 +1,6 @@
 import javax.swing.*;
 import java.awt.*;
+import java.awt.Desktop;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
@@ -12,15 +13,14 @@ import java.util.regex.Pattern;
  * - Public repository için tasarlanmıştır.
  */
 public class UpdateManager {
-    private static final String REPO = "yusufziyrek/DigitalPhotoTransfer"; // Doğru repository adı
-    private static final String LATEST_API = "https://api.github.com/repos/" + REPO + "/releases/latest";
+    private static final String REPO = AppConstants.GITHUB_REPO;
+    private static final String LATEST_API = AppConstants.GITHUB_API_URL;
     private static final Pattern TAG_PATTERN = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern ASSETS_BLOCK = Pattern.compile("\"assets\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
     
     // Caching for API responses
     private static long lastCheckTime = 0;
     private static String cachedResponse = null;
-    private static final long CACHE_DURATION = 5 * 60 * 1000; // 5 dakika
+    private static final long CACHE_DURATION = AppConstants.UPDATE_CACHE_DURATION_MS;
     
     // Logger instance
     private static final AppLogger logger = new AppLogger("PhotoSender");
@@ -57,10 +57,10 @@ public class UpdateManager {
             protected Void doInBackground() {
                 try {
                     logger.info("GitHub API çağrısı yapılıyor: " + LATEST_API);
-                    String json = httpGet(LATEST_API);
-                    if (json == null) {
-                        error = "GitHub API yanıtı alınamadı";
-                        logger.error("GitHub API yanıtı null");
+                    String json = httpGetWithRetry(LATEST_API, AppConstants.UPDATE_MAX_RETRIES);
+                    if (json == null || json.trim().isEmpty()) {
+                        error = "GitHub API yanıtı boş";
+                        logger.error("GitHub API yanıtı boş veya null");
                         return null;
                     }
                     logger.info("GitHub API yanıtı başarıyla alındı (" + json.length() + " karakter)");
@@ -107,7 +107,7 @@ public class UpdateManager {
                                 "Güncelleme kontrolü yapılamıyor.\n" +
                                 "Repository şu anda private durumda.\n\n" +
                                 "Yeni sürüm çıktığında geliştirici tarafından duyurulacaktır.",
-                                "Güncelleme Bilgisi", JOptionPane.INFORMATION_MESSAGE);
+                                AppMessages.TITLE_INFO, JOptionPane.INFORMATION_MESSAGE);
                         }
                         System.out.println("Private repository - güncelleme kontrolü atlandı");
                         return;
@@ -116,8 +116,8 @@ public class UpdateManager {
                         logger.error("Güncelleme kontrolü başarısız: " + error);
                         if (!silentIfUpToDate) {
                             JOptionPane.showMessageDialog(parent, 
-                                "Güncelleme kontrolü başarısız: " + error, 
-                                "Güncelleme", JOptionPane.WARNING_MESSAGE);
+                                AppMessages.withDetails(AppMessages.ERROR_UPDATE_CHECK, error), 
+                                AppMessages.TITLE_UPDATE, JOptionPane.WARNING_MESSAGE);
                         }
                         return;
                     }
@@ -126,33 +126,32 @@ public class UpdateManager {
                 if (latestTag == null) {
                     logger.warn("Release tag bulunamadı");
                     if (!silentIfUpToDate) {
-                        JOptionPane.showMessageDialog(parent, "Release tag bulunamadı.", "Güncelleme", JOptionPane.INFORMATION_MESSAGE);
+                        JOptionPane.showMessageDialog(parent, "Release tag bulunamadı.", AppMessages.TITLE_UPDATE, JOptionPane.INFORMATION_MESSAGE);
                     }
                     return;
                 }
                 
-                if (normalizeVersion(latestTag).equals(normalizeVersion(current))) {
-                    logger.info("Sürüm güncel - herhangi bir güncelleme gerekli değil");
-                    if (!silentIfUpToDate) {
-                        JOptionPane.showMessageDialog(parent, "Güncel sürümü kullanıyorsunuz (" + current + ").", "Güncelleme", JOptionPane.INFORMATION_MESSAGE);
-                    }
-                    System.out.println("Sürüm güncel: " + current);
-                    return;
-                }
-                
+                // MSI kontrolü - Repository sadece yeni sürüm varken public olur
+                // Bu yüzden MSI varsa kesinlikle yeni sürüm var demektir
                 if (msiUrl == null) {
-                    logger.warn("Yeni sürüm bulundu ama MSI asset yok - Tag: " + latestTag);
-                    JOptionPane.showMessageDialog(parent, "Yeni sürüm bulundu (" + latestTag + ") ancak MSI asset yok.", "Güncelleme", JOptionPane.WARNING_MESSAGE);
+                    logger.info("PhotoSender MSI asset bulunamadı - Repository private veya MSI henüz hazır değil (Tag: " + latestTag + ")");
+                    if (!silentIfUpToDate) {
+                        JOptionPane.showMessageDialog(parent, 
+                            "Şu anda güncel sürümü kullanıyorsunuz.\n\n" +
+                            "Repository private durumda veya PhotoSender MSI henüz hazırlanmadı.\n" +
+                            "Yeni sürüm çıktığında otomatik olarak bildirilecektir.",
+                            AppMessages.TITLE_INFO, JOptionPane.INFORMATION_MESSAGE);
+                    }
                     return;
                 }
                 
-                // Yeni sürüm bulundu!
-                logger.info("YENİ SÜRÜM BULUNDU! Mevcut: " + current + " → Yeni: " + latestTag);
+                // MSI bulundu = Yeni sürüm mevcut
+                logger.info("YENİ SÜRÜM BULUNDU! PhotoSender MSI mevcut - Tag: " + latestTag);
                 logger.info("MSI download URL: " + msiUrl);
-                System.out.println("Yeni sürüm mevcut: " + latestTag + " (mevcut: " + current + ")");
+                System.out.println("Yeni sürüm mevcut: " + latestTag);
                 int res = JOptionPane.showConfirmDialog(parent,
-                        "Yeni sürüm bulundu: " + latestTag + "\n" +
-                        "Mevcut sürüm: " + current + "\n\n" +
+                        "Yeni PhotoSender sürümü mevcut: " + latestTag + "\n\n" +
+                        "MSI dosyası indirilerek kurulum başlatılacak.\n" +
                         "Kurulumu başlatmak ister misiniz?",
                         "Yeni Sürüm Mevcut", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
                         
@@ -171,34 +170,99 @@ public class UpdateManager {
         return v.startsWith("v") ? v.substring(1) : v;
     }
 
-    private static String httpGet(String urlStr) throws IOException {
+    private static String httpGetWithRetry(String urlStr, int retryCount) throws IOException {
         // Cache kontrolü
         long now = System.currentTimeMillis();
-        if (cachedResponse != null && (now - lastCheckTime) < CACHE_DURATION) {
+        if (cachedResponse != null && (now - lastCheckTime) < CACHE_DURATION && retryCount == 0) {
             System.out.println("Cache'den yanıt kullanılıyor");
             return cachedResponse;
         }
         
-        java.net.URL url = java.net.URI.create(urlStr).toURL();
-        java.net.HttpURLConnection c = (java.net.HttpURLConnection) url.openConnection();
-        c.setRequestProperty("Accept", "application/vnd.github.v3+json");
+        Exception lastException = null;
         
-        c.setConnectTimeout(6000);
-        c.setReadTimeout(6000);
-        int code = c.getResponseCode();
-        System.out.println("HTTP yanıt kodu: " + c.getResponseCode());
-        if (code >= 400) {
-            String err = readStream(c.getErrorStream());
-            throw new IOException("HTTP " + code + (err == null ? "" : (": " + err)));
+        for (int attempt = 0; attempt <= retryCount; attempt++) {
+            try {
+                java.net.URL url = java.net.URI.create(urlStr).toURL();
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) url.openConnection();
+                c.setRequestProperty("Accept", "application/vnd.github.v3+json");
+                c.setRequestProperty("User-Agent", String.format(AppConstants.USER_AGENT_TEMPLATE, PhotoSenderApp.VERSION));
+                
+                c.setConnectTimeout(AppConstants.UPDATE_CONNECTION_TIMEOUT_MS);
+                c.setReadTimeout(AppConstants.UPDATE_READ_TIMEOUT_MS);
+                
+                int code = c.getResponseCode();
+                System.out.println("HTTP yanıt kodu: " + code + " (deneme: " + (attempt + 1) + ")");
+                
+                if (code >= 400) {
+                    String err = readStream(c.getErrorStream());
+                    IOException httpException = new IOException("HTTP " + code + (err == null ? "" : (": " + err)));
+                    if (attempt < retryCount && isRetryableError(code)) {
+                        lastException = httpException;
+                        logger.warn("HTTP hatası, tekrar denenecek: " + code + " (deneme: " + (attempt + 1) + "/" + (retryCount + 1) + ")");
+                        Thread.sleep(AppConstants.UPDATE_RETRY_DELAY_MS * (attempt + 1)); // Exponential backoff
+                        continue;
+                    } else {
+                        throw httpException;
+                    }
+                }
+                
+                String result = readStream(c.getInputStream());
+                
+                // Başarılı, cache'e kaydet
+                if (result != null && !result.trim().isEmpty()) {
+                    lastCheckTime = now;
+                    cachedResponse = result;
+                    logger.info("GitHub API yanıtı başarıyla alındı ve cache'lendi (" + result.length() + " karakter)");
+                }
+                
+                return result;
+                
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new IOException("İşlem kesintiye uğradı", ie);
+            } catch (Exception e) {
+                lastException = e;
+                if (attempt < retryCount && isRetryableException(e)) {
+                    logger.warn("Bağlantı hatası, tekrar denenecek: " + e.getMessage() + " (deneme: " + (attempt + 1) + "/" + (retryCount + 1) + ")");
+                    try {
+                        Thread.sleep(AppConstants.UPDATE_RETRY_DELAY_MS * (attempt + 1));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("İşlem kesintiye uğradı", ie);
+                    }
+                } else {
+                    if (e instanceof IOException) {
+                        throw (IOException) e;
+                    } else {
+                        throw new IOException("Güncelleme kontrolü hatası: " + e.getMessage(), e);
+                    }
+                }
+            }
         }
         
-        String result = readStream(c.getInputStream());
-        
-        // Cache'e kaydet
-        lastCheckTime = now;
-        cachedResponse = result;
-        
-        return result;
+        // Tüm denemeler başarısız
+        if (lastException instanceof IOException) {
+            throw (IOException) lastException;
+        } else {
+            throw new IOException("Güncelleme kontrolü başarısız (tüm denemeler tükendi): " + lastException.getMessage(), lastException);
+        }
+    }
+    
+    private static boolean isRetryableError(int httpCode) {
+        // 5xx server errors ve bazı 4xx client errors retry edilebilir
+        return (httpCode >= 500) || httpCode == 408 || httpCode == 429;
+    }
+    
+    private static boolean isRetryableException(Exception e) {
+        // Network timeout, connection refused vs. retry edilebilir
+        String message = e.getMessage().toLowerCase();
+        return message.contains("timeout") || 
+               message.contains("connection") || 
+               message.contains("socket") ||
+               message.contains("network") ||
+               e instanceof java.net.SocketTimeoutException ||
+               e instanceof java.net.ConnectException ||
+               e instanceof java.net.SocketException;
     }
 
     private static String readStream(InputStream is) throws IOException {
@@ -240,49 +304,19 @@ public class UpdateManager {
                 try {
                     logger.info("MSI dosyası indiriliyor...");
                     publish("İndirme başlatılıyor...");
-                    String fileName = "PhotoSender-" + normalizeVersion(version) + ".msi";
+                    
+                    // Güvenli dosya adı oluştur
+                    String fileName = AppConstants.MSI_TEMP_PREFIX + normalizeVersion(version) + AppConstants.MSI_TEMP_SUFFIX;
                     tempMsi = new File(System.getProperty("java.io.tmpdir"), fileName);
                     logger.info("Geçici dosya yolu: " + tempMsi.getAbsolutePath());
                     
-                    java.net.URL u = java.net.URI.create(url).toURL();
-                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) u.openConnection();
-                    
-                    int code = c.getResponseCode();
-                    logger.info("MSI indirme HTTP yanıt kodu: " + code);
-                    System.out.println("MSI indirme HTTP yanıt kodu: " + code);
-                    System.out.println("MSI indirme URL: " + url);
-                    if (code >= 400) {
-                        String err = readStream(c.getErrorStream());
-                        logger.error("MSI indirme HTTP hatası: " + code + " - " + err);
-                        System.out.println("MSI indirme hatası: " + err);
-                        throw new IOException("HTTP " + code + (err == null ? "" : (": " + err)));
+                    // Eski dosyayı temizle
+                    if (tempMsi.exists()) {
+                        tempMsi.delete();
                     }
                     
-                    // Dosya boyutunu al
-                    long fileSize = c.getContentLengthLong();
-                    logger.info("MSI dosya boyutu: " + (fileSize > 0 ? (fileSize / (1024 * 1024)) + " MB" : "bilinmiyor"));
-                    publish("Dosya boyutu: " + (fileSize > 0 ? (fileSize / (1024 * 1024)) + " MB" : "Bilinmiyor"));
+                    downloadMsiWithRetry(url, tempMsi);
                     
-                    try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(tempMsi)) {
-                        byte[] buf = new byte[8192];
-                        long totalRead = 0;
-                        int r;
-                        while ((r = in.read(buf)) != -1) {
-                            out.write(buf, 0, r);
-                            totalRead += r;
-                            
-                            // Progress güncelle
-                            if (fileSize > 0) {
-                                int progress = (int) ((totalRead * 100) / fileSize);
-                                setProgress(progress);
-                                publish("İndirilen: " + (totalRead / (1024 * 1024)) + " MB / " + (fileSize / (1024 * 1024)) + " MB");
-                            } else {
-                                publish("İndirilen: " + (totalRead / (1024 * 1024)) + " MB");
-                            }
-                        }
-                    }
-                    logger.info("MSI indirme tamamlandı - Dosya boyutu: " + (tempMsi.length() / (1024 * 1024)) + " MB");
-                    publish("İndirme tamamlandı!");
                 } catch (Exception ex) {
                     logger.error("MSI indirme hatası", ex);
                     System.err.println("MSI download failed: " + ex.getMessage());
@@ -291,6 +325,107 @@ public class UpdateManager {
                     publish("Hata: " + error);
                 }
                 return null;
+            }
+            
+            private void downloadMsiWithRetry(String url, File tempMsi) throws Exception {
+                Exception lastException = null;
+                
+                for (int attempt = 0; attempt < AppConstants.UPDATE_MAX_RETRIES; attempt++) {
+                    try {
+                        java.net.URL u = java.net.URI.create(url).toURL();
+                        java.net.HttpURLConnection c = (java.net.HttpURLConnection) u.openConnection();
+                        c.setRequestProperty("User-Agent", String.format(AppConstants.USER_AGENT_TEMPLATE, PhotoSenderApp.VERSION));
+                        c.setConnectTimeout(AppConstants.UPDATE_CONNECTION_TIMEOUT_MS);
+                        c.setReadTimeout(AppConstants.UPDATE_READ_TIMEOUT_MS);
+                        
+                        int code = c.getResponseCode();
+                        logger.info("MSI indirme HTTP yanıt kodu: " + code + " (deneme: " + (attempt + 1) + ")");
+                        System.out.println("MSI indirme HTTP yanıt kodu: " + code + " (deneme: " + (attempt + 1) + ")");
+                        System.out.println("MSI indirme URL: " + url);
+                        
+                        if (code >= 400) {
+                            String err = readStream(c.getErrorStream());
+                            IOException httpException = new IOException("HTTP " + code + (err == null ? "" : (": " + err)));
+                            
+                            if (attempt < AppConstants.UPDATE_MAX_RETRIES - 1 && isRetryableError(code)) {
+                                lastException = httpException;
+                                logger.warn("MSI indirme HTTP hatası, tekrar denenecek: " + code + " (deneme: " + (attempt + 1) + "/" + AppConstants.UPDATE_MAX_RETRIES + ")");
+                                Thread.sleep(AppConstants.UPDATE_RETRY_DELAY_MS * (attempt + 1));
+                                continue;
+                            } else {
+                                throw httpException;
+                            }
+                        }
+                        
+                        // Dosya boyutunu kontrol et
+                        long fileSize = c.getContentLengthLong();
+                        logger.info("MSI dosya boyutu: " + (fileSize > 0 ? (fileSize / (1024 * 1024)) + " MB" : "bilinmiyor"));
+                        
+                        if (fileSize > 0) {
+                            if (fileSize < AppConstants.MIN_MSI_SIZE_BYTES) {
+                                throw new IOException("MSI dosyası çok küçük: " + fileSize + " bytes");
+                            }
+                            if (fileSize > AppConstants.MAX_MSI_SIZE_BYTES) {
+                                throw new IOException("MSI dosyası çok büyük: " + (fileSize / (1024 * 1024)) + " MB");
+                            }
+                        }
+                        
+                        publish("Dosya boyutu: " + (fileSize > 0 ? (fileSize / (1024 * 1024)) + " MB" : "Bilinmiyor"));
+                        
+                        // Dosyayı indir
+                        try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(tempMsi)) {
+                            byte[] buf = new byte[AppConstants.UPDATE_BUFFER_SIZE];
+                            long totalRead = 0;
+                            int r;
+                            while ((r = in.read(buf)) != -1) {
+                                out.write(buf, 0, r);
+                                totalRead += r;
+                                
+                                // Progress güncelle
+                                if (fileSize > 0) {
+                                    int progress = (int) ((totalRead * 100) / fileSize);
+                                    setProgress(progress);
+                                    publish("İndirilen: " + (totalRead / (1024 * 1024)) + " MB / " + (fileSize / (1024 * 1024)) + " MB");
+                                } else {
+                                    publish("İndirilen: " + (totalRead / (1024 * 1024)) + " MB");
+                                }
+                            }
+                        }
+                        
+                        // İndirme tamamlandı, dosya boyutunu kontrol et
+                        if (!tempMsi.exists() || tempMsi.length() == 0) {
+                            throw new IOException("İndirilen dosya boş veya oluşturulamadı");
+                        }
+                        
+                        if (fileSize > 0 && tempMsi.length() != fileSize) {
+                            throw new IOException("İndirilen dosya boyutu uyuşmuyor. Beklenen: " + fileSize + ", Gerçek: " + tempMsi.length());
+                        }
+                        
+                        logger.info("MSI indirme tamamlandı - Dosya boyutu: " + (tempMsi.length() / (1024 * 1024)) + " MB");
+                        publish("İndirme tamamlandı!");
+                        return; // Başarılı
+                        
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("İndirme kesintiye uğradı", ie);
+                    } catch (Exception e) {
+                        lastException = e;
+                        if (attempt < AppConstants.UPDATE_MAX_RETRIES - 1 && isRetryableException(e)) {
+                            logger.warn("MSI indirme hatası, tekrar denenecek: " + e.getMessage() + " (deneme: " + (attempt + 1) + "/" + AppConstants.UPDATE_MAX_RETRIES + ")");
+                            try {
+                                Thread.sleep(AppConstants.UPDATE_RETRY_DELAY_MS * (attempt + 1));
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("İndirme kesintiye uğradı", ie);
+                            }
+                        } else {
+                            throw e;
+                        }
+                    }
+                }
+                
+                // Tüm denemeler başarısız
+                throw new IOException("MSI indirme başarısız (tüm denemeler tükendi): " + lastException.getMessage(), lastException);
             }
             
             @Override
@@ -308,7 +443,7 @@ public class UpdateManager {
                 
                 if (error != null) {
                     logger.error("MSI indirme başarısız: " + error);
-                    JOptionPane.showMessageDialog(parent, "İndirme hatası: " + error, "Güncelleme", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(parent, AppMessages.withDetails(AppMessages.ERROR_UPDATE_DOWNLOAD, error), AppMessages.TITLE_UPDATE, JOptionPane.ERROR_MESSAGE);
                     return;
                 }
                 
@@ -346,33 +481,32 @@ public class UpdateManager {
         
         int choice = JOptionPane.showConfirmDialog(
             parentFrame,
-            "Güncelleme indirildi (" + (msiFile.length() / (1024 * 1024)) + " MB).\n" +
-            "Kurulumu başlatmak istiyor musunuz?\n\n" +
-            "Not: Kurulum başladığında uygulama otomatik kapanacaktır.",
-            "Kurulum Onayı",
+            AppMessages.formatUpdateInstallConfirm((int)(msiFile.length() / (1024 * 1024))),
+            AppMessages.TITLE_CONFIRM,
             JOptionPane.YES_NO_OPTION,
             JOptionPane.QUESTION_MESSAGE
         );
 
         if (choice == JOptionPane.YES_OPTION) {
             try {
-                logger.info("MSI kurulum komutu çalıştırılıyor...");
+                logger.info("Standart MSI kurulum komutu çalıştırılıyor...");
                 System.out.println("MSI kurulumu başlatılıyor: " + msiFile.getAbsolutePath());
                 
-                // Kurulum komutunu hazırla
-                ProcessBuilder pb = new ProcessBuilder(
-                    "msiexec", "/i", msiFile.getAbsolutePath(), "/passive"
-                );
+                // Standart MSI kurulum komutunu kullan
+                String[] command = new String[AppConstants.MSI_INSTALL_COMMAND_STANDARD.length + 1];
+                System.arraycopy(AppConstants.MSI_INSTALL_COMMAND_STANDARD, 0, command, 0, AppConstants.MSI_INSTALL_COMMAND_STANDARD.length);
+                command[command.length - 1] = msiFile.getAbsolutePath();
                 
+                ProcessBuilder pb = new ProcessBuilder(command);
                 logger.info("ProcessBuilder komutu: " + String.join(" ", pb.command()));
                 
                 // Kurulum başlat
-                pb.start(); // Process referansını tutmaya gerek yok
+                pb.start();
                 
-                logger.info("MSI kurulum süreci başlatıldı - Uygulama 3 saniye sonra kapanacak");
+                logger.info("MSI kurulum süreci başlatıldı - Uygulama " + AppConstants.UPDATE_EXIT_DELAY_SECONDS + " saniye sonra kapanacak");
                 
-                // 3 saniye bekleyip güvenli şekilde uygulamayı kapat
-                Timer timer = new Timer(3000, _ -> {
+                // Standart bekleme süresi ile güvenli şekilde uygulamayı kapat
+                Timer timer = new Timer(AppConstants.UPDATE_EXIT_DELAY_SECONDS * 1000, _ -> {
                     logger.info("Uygulama kapatılıyor - MSI kurulumu devam ediyor");
                     System.out.println("Kurulum başlatıldı - Uygulama kapatılıyor");
                     System.exit(0);
@@ -382,24 +516,36 @@ public class UpdateManager {
                 SwingUtilities.invokeLater(() -> {
                     JOptionPane.showMessageDialog(
                         parentFrame,
-                        "Kurulum başlatıldı. Uygulama 3 saniye sonra kapanacak.\n" +
-                        "Kurulum tamamlandıktan sonra yeni sürümü başlatabilirsiniz.",
-                        "Uygulama Kapanıyor",
+                        AppMessages.formatMsiInstallStarted(AppConstants.UPDATE_EXIT_DELAY_SECONDS),
+                        AppMessages.TITLE_UPDATE,
                         JOptionPane.INFORMATION_MESSAGE
                     );
-                    timer.start(); // Timer'ı dialog kapatıldıktan sonra başlat
+                    timer.start();
                 });
                 
-            } catch (IOException e) {
+            } catch (Exception e) {
                 logger.error("MSI kurulum başlatma hatası", e);
                 System.err.println("MSI installation failed: " + e.getMessage());
-                e.printStackTrace(); // Stack trace for debugging
-                JOptionPane.showMessageDialog(
+                e.printStackTrace();
+                
+                // Hata durumunda manuel kurulum seçeneği sun
+                int manualChoice = JOptionPane.showConfirmDialog(
                     parentFrame,
-                    "Kurulum başlatılamadı: " + e.getMessage(),
-                    "Hata",
+                    AppMessages.withException(AppMessages.ERROR_UPDATE_INSTALL, e) + "\n\n" +
+                    AppMessages.formatMsiManualInstall(msiFile.getAbsolutePath()),
+                    AppMessages.TITLE_ERROR,
+                    JOptionPane.YES_NO_OPTION,
                     JOptionPane.ERROR_MESSAGE
                 );
+                
+                if (manualChoice == JOptionPane.YES_OPTION) {
+                    try {
+                        // Dosya gezginini aç
+                        Desktop.getDesktop().open(msiFile.getParentFile());
+                    } catch (Exception ex) {
+                        logger.error("Dosya gezgini açma hatası", ex);
+                    }
+                }
             }
         } else {
             logger.info("Kullanıcı MSI kurulumunu iptal etti");
@@ -415,56 +561,46 @@ public class UpdateManager {
         String tagName = tagMatcher.group(1);
         System.out.println("Tag name: " + tagName);
         
-        // Public repo için önce browser_download_url'i tercih edelim (daha basit)
+        // Public repo için önce browser_download_url'i tercih edelim (PhotoSender specific)
         Pattern dlPattern = Pattern.compile("\"browser_download_url\"\\s*:\\s*\"([^\"]+PhotoSender-[^\"]+\\.msi)\"");
         Matcher dlMatcher = dlPattern.matcher(json);
         if (dlMatcher.find()) {
             String dlUrl = dlMatcher.group(1);
-            System.out.println("Asset download url (browser_download_url - public repo için ideal): " + dlUrl);
+            System.out.println("PhotoSender asset download url (browser_download_url): " + dlUrl);
             return dlUrl;
+        } else {
+            // Debug: Tüm MSI dosyalarını logla
+            Pattern allMsiPattern = Pattern.compile("\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.msi)\"");
+            Matcher allMsiMatcher = allMsiPattern.matcher(json);
+            System.out.println("Bulunan MSI dosyaları:");
+            while (allMsiMatcher.find()) {
+                String foundMsi = allMsiMatcher.group(1);
+                System.out.println("  - " + foundMsi);
+                if (foundMsi.contains("PhotoViewer")) {
+                    System.out.println("    ^ Bu PhotoViewer MSI'sı - PhotoSender için uygun değil");
+                }
+            }
         }
         
-        // Fallback: API URL (public repo'da da çalışır ama gereksiz)  
-        Pattern apiUrlPattern = Pattern.compile("\"url\"\\s*:\\s*\"(https://api\\.github\\.com/repos/[^\"]+/releases/assets/\\d+)\"");
-        Matcher apiMatcher = apiUrlPattern.matcher(json);
-        if (apiMatcher.find()) {
-            String apiUrl = apiMatcher.group(1);
-            System.out.println("Asset API URL bulundu (fallback): " + apiUrl);
-            return apiUrl;
-        }
-        
-        // Eğer bulunamazsa, assets bloğunu detaylı inceleyelim
-        Matcher assetsMatcher = ASSETS_BLOCK.matcher(json);
-        if (!assetsMatcher.find()) {
-            System.out.println("Assets bloğu bulunamadı");
-            return null;
-        }
-        String assetsJson = assetsMatcher.group(1);
-        System.out.println("Assets JSON bloğu: " + assetsJson);
-        
-        // Asset name ve API URL'ini birlikte arayalım
-        Pattern namePattern = Pattern.compile("\"name\"\\s*:\\s*\"(PhotoSender-[^\"]+\\.msi)\"");
-        Matcher nameMatcher = namePattern.matcher(assetsJson);
-        if (nameMatcher.find()) {
-            String name = nameMatcher.group(1);
-            System.out.println("Asset name: " + name);
+        // Fallback: API URL (PhotoSender specific assets only)
+        // First, find assets that contain PhotoSender in the name
+        Pattern assetsPattern = Pattern.compile("\"assets\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+        Matcher assetsMatcherFallback = assetsPattern.matcher(json);
+        if (assetsMatcherFallback.find()) {
+            String assetsContent = assetsMatcherFallback.group(1);
             
-            // Aynı asset object'inde API URL'ini arayalım
-            Pattern urlPattern = Pattern.compile("\"url\"\\s*:\\s*\"(https://api\\.github\\.com/repos/[^\"]+/releases/assets/\\d+)\"");
-            Matcher urlMatcher = urlPattern.matcher(assetsJson);
-            if (urlMatcher.find()) {
-                String apiUrl = urlMatcher.group(1);
-                System.out.println("Asset API URL bulundu: " + apiUrl);
+            // Look for PhotoSender MSI assets with both name and URL
+            Pattern photoSenderAssetPattern = Pattern.compile("\\{[^}]*\"name\"\\s*:\\s*\"(PhotoSender[^\"]*\\.msi)\"[^}]*\"url\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}");
+            Matcher photoSenderAssetMatcher = photoSenderAssetPattern.matcher(assetsContent);
+            if (photoSenderAssetMatcher.find()) {
+                String fileName = photoSenderAssetMatcher.group(1);
+                String apiUrl = photoSenderAssetMatcher.group(2);
+                System.out.println("PhotoSender asset API URL bulundu: " + fileName + " -> " + apiUrl);
                 return apiUrl;
             }
-            
-            // API URL bulunamazsa manuel URL oluştur
-            String dlUrl = "https://github.com/" + REPO + "/releases/download/" + tagName + "/" + name;
-            System.out.println("Manuel oluşturulan download URL: " + dlUrl);
-            return dlUrl;
         }
         
-        System.out.println("MSI asset bulunamadı");
+        System.out.println("PhotoSender için uygun MSI asset bulunamadı");
         return null;
     }
 }

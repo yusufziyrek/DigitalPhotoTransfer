@@ -17,7 +17,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class PhotoSenderApp extends JFrame {
-    public static final String VERSION = "1.0.5"; // GitHub release ile senkronize
+    public static final String VERSION = AppConstants.VERSION; // GitHub release ile senkronize
     private static final AppLogger logger = new AppLogger("PhotoSender");
     
     private IpList ipList;
@@ -164,10 +164,10 @@ public class PhotoSenderApp extends JFrame {
                 IpList.IpEntry selected = ipJList.getSelectedValue();
                 if (selected == null) return;
                 String ip = selected.getIp();
-                int port = 5000; // Port bilgisini buradan güncelleyebilirsiniz
+                int port = AppConstants.DEFAULT_PORT;
                 try (Socket socket = new Socket(ip, port);
                      BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));) {
-                    writer.write("SHOW_DEFAULT\n");
+                    writer.write(AppConstants.COMMAND_SHOW_DEFAULT + "\n");
                     writer.flush();
                     JOptionPane.showMessageDialog(this, "İşlem Başarılı " + ip);
                 } catch (IOException ex) {
@@ -192,7 +192,7 @@ public class PhotoSenderApp extends JFrame {
                     try {
                         ipList.saveToFile(IP_LIST_FILE);
                     } catch (IOException ex) {
-                        JOptionPane.showMessageDialog(this, "IP listesi kaydedilemedi: " + ex.getMessage());
+                        JOptionPane.showMessageDialog(this, AppMessages.formatIpSaveError(ex.getMessage()));
                     }
                 }
             }
@@ -207,7 +207,7 @@ public class PhotoSenderApp extends JFrame {
                 try {
                     ipList.saveToFile(IP_LIST_FILE);
                 } catch (IOException ex) {
-                    JOptionPane.showMessageDialog(this, "IP listesi kaydedilemedi: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(this, AppMessages.formatIpSaveError(ex.getMessage()));
                 }
             }
         });
@@ -220,7 +220,7 @@ public class PhotoSenderApp extends JFrame {
                     ipListModel.addElement(entry);
                 }
             } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "IP listesi okunamadı: " + ex.getMessage());
+                JOptionPane.showMessageDialog(this, AppMessages.formatIpReadError(ex.getMessage()));
             }
         }
 
@@ -290,7 +290,7 @@ public class PhotoSenderApp extends JFrame {
                     selectedPhoto = file;
                     logger.info("Fotoğraf seçildi: " + file.getName() + " (" + (file.length() / 1024) + " KB)");
                 } else {
-                    JOptionPane.showMessageDialog(this, "Lütfen bir resim dosyası seçin.");
+                    JOptionPane.showMessageDialog(this, AppMessages.INFO_PLEASE_SELECT_PHOTO);
                     selectedPhoto = null;
                     logger.warn("Geçersiz dosya türü seçildi: " + file.getName());
                 }
@@ -299,7 +299,7 @@ public class PhotoSenderApp extends JFrame {
 
     sendAllButton.addActionListener(_ -> {
             if (selectedPhoto == null) {
-                JOptionPane.showMessageDialog(this, "Önce fotoğraf seçin.");
+                JOptionPane.showMessageDialog(this, AppMessages.ERROR_NO_PHOTO_SELECTED);
                 return;
             }
             logger.info("Toplu gönderim başlatıldı - " + ipList.getIpEntries().size() + " hedef");
@@ -308,12 +308,12 @@ public class PhotoSenderApp extends JFrame {
 
     sendSingleButton.addActionListener(_ -> {
             if (selectedPhoto == null) {
-                JOptionPane.showMessageDialog(this, "Önce fotoğraf seçin.");
+                JOptionPane.showMessageDialog(this, AppMessages.ERROR_NO_PHOTO_SELECTED);
                 return;
             }
             IpList.IpEntry selected = ipJList.getSelectedValue();
             if (selected == null) {
-                JOptionPane.showMessageDialog(this, "Listeden bir IP seçin.");
+                JOptionPane.showMessageDialog(this, AppMessages.ERROR_NO_IP_SELECTED);
                 return;
             }
             sendPhotoToIps(selectedPhoto, List.of(selected));
@@ -339,22 +339,22 @@ public class PhotoSenderApp extends JFrame {
     private void sendPhotoToIps(File photo, List<IpList.IpEntry> entries) {
         // Enhanced input validation
         if (photo == null || !photo.exists()) {
-            JOptionPane.showMessageDialog(this, "Geçersiz fotoğraf dosyası", "Hata", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, AppMessages.ERROR_IMAGE_INVALID, AppMessages.TITLE_ERROR, JOptionPane.ERROR_MESSAGE);
             return;
         }
         
         if (!photo.canRead()) {
-            JOptionPane.showMessageDialog(this, "Fotoğraf dosyası okunamıyor", "Hata", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, AppMessages.ERROR_IMAGE_READ, AppMessages.TITLE_ERROR, JOptionPane.ERROR_MESSAGE);
             return;
         }
         
         if (photo.length() == 0) {
-            JOptionPane.showMessageDialog(this, "Fotoğraf dosyası boş", "Hata", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, AppMessages.ERROR_FILE_EMPTY, AppMessages.TITLE_ERROR, JOptionPane.ERROR_MESSAGE);
             return;
         }
         
         if (entries == null || entries.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Gönderilecek IP adresi bulunamadı", "Hata", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, AppMessages.ERROR_NO_IP_TO_SEND, AppMessages.TITLE_WARNING, JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -365,11 +365,11 @@ public class PhotoSenderApp extends JFrame {
         sendSingleButton.setEnabled(false);
         sendWithTimerButton.setEnabled(false);
 
-        final int CONNECT_TIMEOUT_MS = 5000;
-        final int READ_TIMEOUT_MS = 10000;
-        final int MAX_RETRIES = 2;
-        final int BUFFER_SIZE = 8 * 1024;
-        final long READ_ONCE_THRESHOLD = 20L * 1024 * 1024; // 20 MB
+        final int CONNECT_TIMEOUT_MS = AppConstants.CONNECTION_TIMEOUT_MS;
+        final int READ_TIMEOUT_MS = AppConstants.READ_TIMEOUT_MS;
+        final int MAX_RETRIES = AppConstants.MAX_RETRIES;
+        final int BUFFER_SIZE = AppConstants.BUFFER_SIZE;
+        final long READ_ONCE_THRESHOLD = AppConstants.READ_ONCE_THRESHOLD;
 
     // Progress dialog (create first so worker can reference it)
     final JDialog progressDialog = new JDialog(this, "Gönderiliyor...", true);
@@ -422,13 +422,13 @@ public class PhotoSenderApp extends JFrame {
                             Socket socket = null;
                             try {
                                 socket = new Socket();
-                                socket.connect(new InetSocketAddress(ip, 5000), CONNECT_TIMEOUT_MS);
+                                socket.connect(new InetSocketAddress(ip, AppConstants.DEFAULT_PORT), CONNECT_TIMEOUT_MS);
                                 socket.setSoTimeout(READ_TIMEOUT_MS);
                                 OutputStream os = socket.getOutputStream();
                                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os));
                                 long lengthToSend = (photoBytesRef.get() != null) ? photoBytesRef.get().length : photo.length();
                                 // Send header with length so receiver can read exact bytes
-                                writer.write("SEND_PHOTO:" + lengthToSend + "\n");
+                                writer.write(AppConstants.COMMAND_SEND_PHOTO + lengthToSend + "\n");
                                 writer.flush();
 
                                 if (useByteArrayRef.get() && photoBytesRef.get() != null) {
@@ -447,9 +447,7 @@ public class PhotoSenderApp extends JFrame {
                                 // Wait for ACK from receiver
                                 String ack = null;
                                 try {
-                                    socket.setSoTimeout(15000); // 15s ack timeout
-                                    // Bu değer READ_TIMEOUT_MS ile uyumlu olmalı
-                                    socket.setSoTimeout(READ_TIMEOUT_MS); // Düzeltme
+                                    socket.setSoTimeout(READ_TIMEOUT_MS);
                                     BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), "US-ASCII"));
                                     ack = br.readLine();
                                 } catch (SocketTimeoutException ste) {
@@ -457,7 +455,7 @@ public class PhotoSenderApp extends JFrame {
                                 } catch (IOException ioe) {
                                     System.out.println("ACK okuma hatası: " + ip + " -> " + ioe.getMessage());
                                 }
-                                if ("OK".equals(ack)) {
+                                if (AppConstants.RESPONSE_OK.equals(ack)) {
                                     success = true;
                                     logger.info("Photo sent successfully to " + name + " (" + ip + ")");
                                     System.out.println("Gönderildi ve onaylandı: " + name + " (" + ip + ")");
@@ -482,7 +480,7 @@ public class PhotoSenderApp extends JFrame {
 
                             if (!success) {
                                 // exponential backoff
-                                try { Thread.sleep(500L * attempt); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                                try { Thread.sleep(AppConstants.RETRY_BACKOFF_BASE_MS * attempt); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
                             }
                         }
 
@@ -528,12 +526,12 @@ public class PhotoSenderApp extends JFrame {
                 progressDialog.dispose();
 
                 if (failures.isEmpty()) {
-                    JOptionPane.showMessageDialog(PhotoSenderApp.this, "Fotoğraf gönderildi.");
+                    JOptionPane.showMessageDialog(PhotoSenderApp.this, AppMessages.INFO_PHOTO_SENT);
                 } else {
                     StringBuilder sb = new StringBuilder();
                     sb.append("Bazı hedeflere gönderilemedi:\n");
                     for (String f : failures) sb.append("- ").append(f).append("\n");
-                    JOptionPane.showMessageDialog(PhotoSenderApp.this, sb.toString(), "Gönderim Hataları", JOptionPane.WARNING_MESSAGE);
+                    JOptionPane.showMessageDialog(PhotoSenderApp.this, sb.toString(), AppMessages.ERROR_NETWORK_SEND, JOptionPane.WARNING_MESSAGE);
                 }
             }
         };
@@ -558,7 +556,7 @@ public class PhotoSenderApp extends JFrame {
     private void sendPhotoWithTimer(File photo, List<IpList.IpEntry> entries, int durationSeconds) {
         // Quick checks
         if (entries == null || entries.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Gönderecek IP yok.");
+            JOptionPane.showMessageDialog(this, AppMessages.ERROR_NO_IP_TO_SEND);
             return;
         }
 
@@ -569,11 +567,11 @@ public class PhotoSenderApp extends JFrame {
         sendSingleButton.setEnabled(false);
         sendWithTimerButton.setEnabled(false);
 
-        final int CONNECT_TIMEOUT_MS = 5000;
-        final int READ_TIMEOUT_MS = 10000;
-        final int MAX_RETRIES = 2;
-        final int BUFFER_SIZE = 8 * 1024;
-        final long READ_ONCE_THRESHOLD = 20L * 1024 * 1024; // 20 MB
+        final int CONNECT_TIMEOUT_MS = AppConstants.CONNECTION_TIMEOUT_MS;
+        final int READ_TIMEOUT_MS = AppConstants.READ_TIMEOUT_MS;
+        final int MAX_RETRIES = AppConstants.MAX_RETRIES;
+        final int BUFFER_SIZE = AppConstants.BUFFER_SIZE;
+        final long READ_ONCE_THRESHOLD = AppConstants.READ_ONCE_THRESHOLD;
 
         // Progress dialog (create first so worker can reference it)
         final JDialog progressDialog = new JDialog(this, "Zamanlı Gönderiliyor...", true);
@@ -626,7 +624,7 @@ public class PhotoSenderApp extends JFrame {
                             Socket socket = null;
                             try {
                                 socket = new Socket();
-                                socket.connect(new InetSocketAddress(ip, 5000), CONNECT_TIMEOUT_MS);
+                                socket.connect(new InetSocketAddress(ip, AppConstants.DEFAULT_PORT), CONNECT_TIMEOUT_MS);
                                 socket.setSoTimeout(READ_TIMEOUT_MS);
                                 OutputStream os = socket.getOutputStream();
                                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os));
@@ -634,7 +632,7 @@ public class PhotoSenderApp extends JFrame {
                                 long lengthToSend = (photoBytesRef.get() != null) ? photoBytesRef.get().length : photo.length();
                                 
                                 // Yeni protokol: Süre bilgisi ile gönder
-                                writer.write("SEND_PHOTO_WITH_TIMER:" + lengthToSend + ":" + durationSeconds + "\n");
+                                writer.write(AppConstants.COMMAND_SEND_PHOTO_WITH_TIMER + lengthToSend + ":" + durationSeconds + "\n");
                                 writer.flush();
 
                                 if (useByteArrayRef.get() && photoBytesRef.get() != null) {
@@ -662,10 +660,10 @@ public class PhotoSenderApp extends JFrame {
                                 } catch (IOException ioe) {
                                     System.out.println("ACK okuma hatası: " + ip + " -> " + ioe.getMessage());
                                 }
-                                if ("OK".equals(ack)) {
+                                if (AppConstants.RESPONSE_OK.equals(ack)) {
                                     success = true;
-                                    logger.info("Timed photo sent successfully to " + name + " (" + ip + ") - " + (durationSeconds / 3600) + " hours");
-                                    System.out.println("Zamanlı gönderildi ve onaylandı: " + name + " (" + ip + ") - " + (durationSeconds / 3600) + " saat");
+                                    logger.info("Timed photo sent successfully to " + name + " (" + ip + ") - " + (durationSeconds / AppConstants.HOUR_IN_SECONDS) + " hours");
+                                    System.out.println("Zamanlı gönderildi ve onaylandı: " + name + " (" + ip + ") - " + (durationSeconds / AppConstants.HOUR_IN_SECONDS) + " saat");
                                 } else {
                                     logger.warn("Timed photo sent but no ACK from " + name + " (" + ip + ") ack=" + ack);
                                     System.out.println("Gönderildi fakat onay alınamadı: " + name + " (" + ip + ") ack=" + ack);
@@ -687,7 +685,7 @@ public class PhotoSenderApp extends JFrame {
 
                             if (!success) {
                                 // exponential backoff
-                                try { Thread.sleep(500L * attempt); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                                try { Thread.sleep(AppConstants.RETRY_BACKOFF_BASE_MS * attempt); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
                             }
                         }
 
@@ -856,12 +854,12 @@ public class PhotoSenderApp extends JFrame {
         dialog.add(buttonPanel, BorderLayout.SOUTH);
 
         // Hızlı butonların event'leri
-    btn1Hour.addActionListener(_ -> sendWithDuration(targetEntry, 1 * 3600, dialog));
-    btn6Hours.addActionListener(_ -> sendWithDuration(targetEntry, 6 * 3600, dialog));
-    btn1Day.addActionListener(_ -> sendWithDuration(targetEntry, 24 * 3600, dialog));
-    btn3Days.addActionListener(_ -> sendWithDuration(targetEntry, 3 * 24 * 3600, dialog));
-    btn1Week.addActionListener(_ -> sendWithDuration(targetEntry, 7 * 24 * 3600, dialog));
-    btn1Month.addActionListener(_ -> sendWithDuration(targetEntry, 30 * 24 * 3600, dialog));
+    btn1Hour.addActionListener(_ -> sendWithDuration(targetEntry, AppConstants.HOUR_IN_SECONDS, dialog));
+    btn6Hours.addActionListener(_ -> sendWithDuration(targetEntry, 6 * AppConstants.HOUR_IN_SECONDS, dialog));
+    btn1Day.addActionListener(_ -> sendWithDuration(targetEntry, AppConstants.DAY_IN_SECONDS, dialog));
+    btn3Days.addActionListener(_ -> sendWithDuration(targetEntry, 3 * AppConstants.DAY_IN_SECONDS, dialog));
+    btn1Week.addActionListener(_ -> sendWithDuration(targetEntry, AppConstants.WEEK_IN_SECONDS, dialog));
+    btn1Month.addActionListener(_ -> sendWithDuration(targetEntry, AppConstants.MONTH_IN_SECONDS, dialog));
 
         // Özel süre gönder butonu
     sendButton.addActionListener(_ -> {
@@ -869,11 +867,11 @@ public class PhotoSenderApp extends JFrame {
             int hours = (Integer) hourSpinner.getValue();
             int minutes = (Integer) minuteSpinner.getValue();
             
-            int totalSeconds = days * 24 * 3600 + hours * 3600 + minutes * 60;
+            int totalSeconds = days * AppConstants.DAY_IN_SECONDS + hours * AppConstants.HOUR_IN_SECONDS + minutes * 60;
             
             if (totalSeconds <= 0) {
-                JOptionPane.showMessageDialog(dialog, "Lütfen geçerli bir süre girin.\n(En az 1 dakika olmalı)", 
-                                            "Geçersiz Süre", JOptionPane.WARNING_MESSAGE);
+                JOptionPane.showMessageDialog(dialog, AppMessages.MSG_TIME_INPUT_ERROR, 
+                                            AppMessages.ERROR_INVALID_TIME, JOptionPane.WARNING_MESSAGE);
                 return;
             }
             
