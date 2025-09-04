@@ -10,7 +10,7 @@
 public final class AppConstants {
     
     // Versiyon ve Uygulama Bilgileri
-    public static final String VERSION = "1.0.5";
+    public static final String VERSION = "1.0.6";
     public static final String APP_TITLE = "PhotoViewer - Wyndham Grand Istanbul Europe";
     public static final String CONTACT_EMAIL = "yusufziyrek1@gmail.com";
     public static final String COPYRIGHT = "© 2025 Yusuf Ziyrek";
