@@ -69,7 +69,6 @@ public final class AppConstants {
     public static final String COMMAND_SEND_PHOTO_WITH_TIMER = "SEND_PHOTO_WITH_TIMER:";
     public static final String COMMAND_GET_STATUS = "GET_STATUS";
     public static final String COMMAND_GET_SCREENSHOT = "GET_SCREENSHOT";
-    public static final String COMMAND_GET_SCREENSHOT_HD = "GET_SCREENSHOT_HD"; // Ultra kalite için
     public static final String RESPONSE_OK = "OK\n";
     public static final String RESPONSE_ERROR = "ERR\n";
     

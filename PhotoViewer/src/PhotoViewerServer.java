@@ -20,6 +20,23 @@ public class PhotoViewerServer {
     // Properties dosyası thread-safe erişimi için kilit
     private static final Object CONFIG_LOCK = new Object();
     
+    // Performance optimizasyonu için statik Robot nesnesi
+    private static Robot sharedRobot = null;
+    
+    // Robot nesnesini tek seferlik oluştur
+    private static Robot getRobot() throws AWTException {
+        if (sharedRobot == null) {
+            synchronized (PhotoViewerServer.class) {
+                if (sharedRobot == null) {
+                    sharedRobot = new Robot();
+                    sharedRobot.setAutoDelay(0); // Performans için delay kaldır
+                    logger.info("Robot nesnesi optimize edildi - Screenshot performansı artırıldı");
+                }
+            }
+        }
+        return sharedRobot;
+    }
+    
     public static void main(String[] args) {
         int port = AppConstants.DEFAULT_PORT; // Dinlenecek port
         JFrame frame = new JFrame();
@@ -210,14 +227,10 @@ public class PhotoViewerServer {
                             byte[] screenshotData = captureScreenshot();
                             long captureTime = System.currentTimeMillis() - startTime;
                             
-                            logger.debug("Screenshot yakalandı: " + screenshotData.length + " byte (" + 
-                                       (screenshotData.length / 1024) + " KB) - Süre: " + captureTime + "ms");
-                            
                             OutputStream out = clientSocket.getOutputStream();
                             
                             // Önce boyutu gönder
                             String header = "SCREENSHOT:" + screenshotData.length + "\n";
-                            logger.debug("Screenshot header gönderiliyor: " + header.trim());
                             out.write(header.getBytes("UTF-8"));
                             out.flush();
                             
@@ -232,38 +245,6 @@ public class PhotoViewerServer {
                                          "Yakalama: " + captureTime + "ms, Transfer: " + transferTime + "ms, Toplam: " + totalTime + "ms");
                         } catch (Exception ex) {
                             logger.error("Screenshot gönderim hatası - Kaynak: " + clientIP + " - " + ex.getClass().getSimpleName() + ": " + ex.getMessage(), ex);
-                        }
-                    } else if (command != null && command.equals(AppConstants.COMMAND_GET_SCREENSHOT_HD)) {
-                        // Ultra yüksek kaliteli screenshot sorgulama
-                        try {
-                            logger.info("Ultra kalite screenshot isteği alındı - Kaynak: " + clientIP);
-                            long startTime = System.currentTimeMillis();
-                            
-                            byte[] screenshotData = captureHighQualityScreenshot();
-                            long captureTime = System.currentTimeMillis() - startTime;
-                            
-                            logger.debug("Ultra kalite screenshot yakalandı: " + screenshotData.length + " byte (" + 
-                                       (screenshotData.length / 1024) + " KB) - Süre: " + captureTime + "ms");
-                            
-                            OutputStream out = clientSocket.getOutputStream();
-                            
-                            // Önce boyutu gönder
-                            String header = "SCREENSHOT:" + screenshotData.length + "\n";
-                            logger.debug("Ultra kalite header gönderiliyor: " + header.trim());
-                            out.write(header.getBytes("UTF-8"));
-                            out.flush();
-                            
-                            // Sonra screenshot verisini gönder
-                            long transferStart = System.currentTimeMillis();
-                            out.write(screenshotData);
-                            out.flush();
-                            long transferTime = System.currentTimeMillis() - transferStart;
-                            
-                            long totalTime = System.currentTimeMillis() - startTime;
-                            logger.success("Ultra kalite screenshot başarıyla gönderildi - Boyut: " + (screenshotData.length / 1024) + " KB, " +
-                                         "Yakalama: " + captureTime + "ms, Transfer: " + transferTime + "ms, Toplam: " + totalTime + "ms");
-                        } catch (Exception ex) {
-                            logger.error("Ultra kalite screenshot gönderim hatası - Kaynak: " + clientIP + " - " + ex.getClass().getSimpleName() + ": " + ex.getMessage(), ex);
                         }
                     } else if (command != null && command.startsWith(AppConstants.COMMAND_SEND_PHOTO_WITH_TIMER)) {
                         // Yeni protokol: SEND_PHOTO_WITH_TIMER:boyut:süre
@@ -561,113 +542,145 @@ public class PhotoViewerServer {
         return fileChooser;
     }
 
-    // Screenshot alma metodu - Ultra yüksek kalite
+    // Screenshot alma metodu - Ultra yüksek kalite ve optimizasyon
     private static byte[] captureScreenshot() throws Exception {
-        // Ekran görüntüsü al
-        Robot robot = new Robot();
+        long startTime = System.currentTimeMillis();
+        
+        // Optimize edilmiş Robot nesnesi kullan
+        Robot robot = getRobot();
+        
         Rectangle screenRect = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
-        logger.debug("Ekran boyutu: " + screenRect.width + "x" + screenRect.height);
-        
         BufferedImage screenshot = robot.createScreenCapture(screenRect);
-        logger.debug("Ham screenshot yakalandı: " + screenshot.getWidth() + "x" + screenshot.getHeight());
         
-        // İyi kalite ve performans dengesi (1600px max - Full HD+ kalitesi)
-        int maxWidth = 1600; // 1280'den artırıldı, 1920'den az
-        int newWidth = Math.min(screenshot.getWidth(), maxWidth);
-        int newHeight = (screenshot.getHeight() * newWidth) / screenshot.getWidth();
+        long captureTime = System.currentTimeMillis() - startTime;
         
-        logger.debug("Yeniden boyutlandırma (balanced): " + screenshot.getWidth() + "x" + screenshot.getHeight() + 
-                    " -> " + newWidth + "x" + newHeight);
+        // Çoklu çözünürlük desteği - ekran boyutuna göre akıllı ölçeklendirme
+        int originalWidth = screenshot.getWidth();
+        int originalHeight = screenshot.getHeight();
         
-        // Kalite ve hız dengeli ayarlar
-        BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = resized.createGraphics();
+        int targetWidth, targetHeight;
         
-        // Dengeli kalite ayarları - İyi görüntü ama hızlı
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC); // Kaliteyi geri getir
-        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY); // Kaliteyi geri getir
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON); // Kenar yumuşatma
-        g.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY); // Renk kalitesi
-        g.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        // Ekran çözünürlüğüne göre optimum kalite belirle
+        if (originalWidth >= 3840) { // 4K ve üzeri
+            targetWidth = 2560; // 2K kalitesi (Ultra HD)
+            targetHeight = (originalHeight * targetWidth) / originalWidth;
+        } else if (originalWidth >= 2560) { // 2K
+            targetWidth = 1920; // Full HD kalitesi
+            targetHeight = (originalHeight * targetWidth) / originalWidth;
+        } else if (originalWidth >= 1920) { // Full HD
+            targetWidth = 1600; // HD+ kalitesi
+            targetHeight = (originalHeight * targetWidth) / originalWidth;
+        } else {
+            // Düşük çözünürlük ekranlar için orijinal boyutu koru
+            targetWidth = originalWidth;
+            targetHeight = originalHeight;
+        }
         
-        g.drawImage(screenshot, 0, 0, newWidth, newHeight, null);
-        g.dispose();
+        logger.info("Screenshot kalite optimizasyonu: " + originalWidth + "x" + originalHeight + 
+                   " -> " + targetWidth + "x" + targetHeight + " (Capture: " + captureTime + "ms)");
         
-        logger.debug("Görüntü işleme tamamlandı, PNG encoding başlıyor...");
+        long scaleStartTime = System.currentTimeMillis();
+        BufferedImage optimizedImage;
         
-        // PNG formatında encode et (kayıpsız kalite!)
+        if (targetWidth != originalWidth || targetHeight != originalHeight) {
+            // Ultra yüksek kaliteli resize - Çok aşamalı ölçeklendirme
+            optimizedImage = createHighQualityScaledImage(screenshot, targetWidth, targetHeight);
+        } else {
+            optimizedImage = screenshot;
+        }
+        
+        long scaleTime = System.currentTimeMillis() - scaleStartTime;
+        
+        // PNG formatında encode et - En yüksek kalite ayarları
+        long encodeStartTime = System.currentTimeMillis();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         
-        // PNG - Kayıpsız sıkıştırma
+        // PNG writer ile özel ayarlar
         javax.imageio.ImageWriter writer = javax.imageio.ImageIO.getImageWritersByFormatName("png").next();
-        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+        javax.imageio.ImageWriteParam writeParam = writer.getDefaultWriteParam();
+        
+        // PNG metadata ile kalite optimizasyonu
+        javax.imageio.metadata.IIOMetadata metadata = writer.getDefaultImageMetadata(
+            new javax.imageio.ImageTypeSpecifier(optimizedImage), writeParam);
         
         javax.imageio.stream.ImageOutputStream ios = javax.imageio.ImageIO.createImageOutputStream(baos);
         writer.setOutput(ios);
-        writer.write(null, new javax.imageio.IIOImage(resized, null, null), param);
+        writer.write(metadata, new javax.imageio.IIOImage(optimizedImage, null, metadata), writeParam);
         
         writer.dispose();
         ios.close();
         
         byte[] result = baos.toByteArray();
-        logger.debug("PNG encoding tamamlandı - Final boyut: " + result.length + " byte (" + (result.length / 1024) + " KB)");
+        long encodeTime = System.currentTimeMillis() - encodeStartTime;
+        long totalTime = System.currentTimeMillis() - startTime;
+        
+        logger.info("Screenshot oluşturuldu - Boyut: " + String.format("%.2f", result.length / 1024.0 / 1024.0) + 
+                   " MB | Capture: " + captureTime + "ms | Scale: " + scaleTime + "ms | Encode: " + encodeTime + 
+                   "ms | Toplam: " + totalTime + "ms");
         
         return result;
     }
-
-    // Ultra yüksek kaliteli screenshot (tek görüntü için)
-    private static byte[] captureHighQualityScreenshot() throws Exception {
-        Robot robot = new Robot();
-        Rectangle screenRect = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
-        logger.debug("Ultra kalite ekran boyutu: " + screenRect.width + "x" + screenRect.height);
+    
+    // Çok aşamalı yüksek kaliteli ölçeklendirme metodu - Bellek optimize
+    private static BufferedImage createHighQualityScaledImage(BufferedImage original, int targetWidth, int targetHeight) {
+        int currentWidth = original.getWidth();
+        int currentHeight = original.getHeight();
         
-        BufferedImage screenshot = robot.createScreenCapture(screenRect);
-        logger.debug("Ultra kalite ham screenshot: " + screenshot.getWidth() + "x" + screenshot.getHeight());
+        BufferedImage currentImage = original;
         
-        // Ultra yüksek çözünürlük (1920px max - 4K destekli)
-        int maxWidth = 1920;
-        int newWidth = Math.min(screenshot.getWidth(), maxWidth);
-        int newHeight = (screenshot.getHeight() * newWidth) / screenshot.getWidth();
+        // Eğer ölçeklendirme %50'den fazlaysa, aşamalı ölçeklendirme yap
+        double scaleRatio = (double) targetWidth / currentWidth;
         
-        logger.debug("Ultra kalite boyutlandırma: " + screenshot.getWidth() + "x" + screenshot.getHeight() + 
-                    " -> " + newWidth + "x" + newHeight);
+        if (scaleRatio < 0.5) {
+            // Aşamalı küçültme - her seferinde yarıya indir
+            while (currentWidth > targetWidth * 2 || currentHeight > targetHeight * 2) {
+                int newWidth = Math.max(currentWidth / 2, targetWidth);
+                int newHeight = Math.max(currentHeight / 2, targetHeight);
+                
+                BufferedImage tempImage = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+                Graphics2D g2d = tempImage.createGraphics();
+                
+                // Aşamalı ölçeklendirme için optimize ayarlar
+                g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                
+                g2d.drawImage(currentImage, 0, 0, newWidth, newHeight, null);
+                g2d.dispose();
+                
+                // Bellek optimizasyonu - önceki adımı temizle
+                if (currentImage != original) {
+                    currentImage.flush();
+                }
+                
+                currentImage = tempImage;
+                currentWidth = newWidth;
+                currentHeight = newHeight;
+            }
+        }
         
-        // Ultra yüksek kaliteli resize
-        BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = resized.createGraphics();
+        // Son aşama - Ultra kalite ölçeklendirme
+        BufferedImage finalImage = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = finalImage.createGraphics();
         
-        // En iyi kalite ayarları - Ultra mode
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
-        g.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
-        g.setRenderingHint(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE);
-        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        // En yüksek kalite ayarları - son aşama için
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE);
+        g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
         
-        g.drawImage(screenshot, 0, 0, newWidth, newHeight, null);
-        g.dispose();
+        g2d.drawImage(currentImage, 0, 0, targetWidth, targetHeight, null);
+        g2d.dispose();
         
-        logger.debug("Ultra kalite görüntü işleme tamamlandı, PNG encoding...");
+        // Bellek temizleme - ara adım olan görüntüyü temizle
+        if (currentImage != original) {
+            currentImage.flush();
+        }
         
-        // PNG formatında encode et (kayıpsız kalite!)
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        
-        // PNG - Kayıpsız sıkıştırma
-        javax.imageio.ImageWriter writer = javax.imageio.ImageIO.getImageWritersByFormatName("png").next();
-        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
-        
-        javax.imageio.stream.ImageOutputStream ios = javax.imageio.ImageIO.createImageOutputStream(baos);
-        writer.setOutput(ios);
-        writer.write(null, new javax.imageio.IIOImage(resized, null, null), param);
-        
-        writer.dispose();
-        ios.close();
-        
-        byte[] result = baos.toByteArray();
-        logger.debug("Ultra kalite PNG encoding tamamlandı - Final boyut: " + result.length + " byte (" + (result.length / 1024) + " KB)");
-        
-        return result;
+        return finalImage;
     }
 }

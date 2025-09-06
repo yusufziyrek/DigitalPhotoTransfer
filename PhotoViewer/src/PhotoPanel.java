@@ -215,9 +215,30 @@ public class PhotoPanel extends JPanel {
         return isCustomImageShowing ? "Toplantı Var" : "Default";
     }
     
-    // Detaylı durum bilgisi - aynı basit mantık
+    // Detaylı durum bilgisi - geliştirilmiş mantık
     public String getStatusDetails() {
-        return isCustomImageShowing ? "Toplantı Var" : "Default";
+        // Önce basit durum kontrolü
+        if (!isCustomImageShowing) {
+            return "Default";
+        }
+        
+        // Eğer custom image gösteriliyor ve timer aktifse
+        if (autoReturnTimer != null && autoReturnTimer.isRunning()) {
+            return "Toplantı Var";
+        }
+        
+        // Eğer long term task varsa
+        if (longTermTask != null && !longTermTask.isDone()) {
+            return "Toplantı Var";
+        }
+        
+        // Eğer custom image var ama timer yok (manuel custom image)
+        if (image != null && isCustomImageShowing) {
+            return "Toplantı Var";
+        }
+        
+        // Fallback
+        return "Default";
     }
 
     public void setImage(BufferedImage img) {

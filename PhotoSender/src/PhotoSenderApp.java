@@ -29,8 +29,9 @@ public class PhotoSenderApp extends JFrame {
     private File selectedPhoto;
     private static final File IP_LIST_FILE = getAppDataIpListFile();
     
-    // Otomatik durum yenileme için timer
+    // Otomatik durum yenileme için timer - 10 saniyede bir tarar
     private javax.swing.Timer statusRefreshTimer;
+    private static final int STATUS_REFRESH_INTERVAL = 10000; // 10 saniye
     
     // Canlı ekran izleme için
     private javax.swing.Timer liveViewTimer;
@@ -38,7 +39,6 @@ public class PhotoSenderApp extends JFrame {
     private JLabel liveImageLabel;
     private String currentLiveViewIp;
     private String currentLiveViewName;
-    private boolean isLiveViewFullScreen = false; // Canlı izleme tam ekran durumu
 
     private static File getAppDataIpListFile() {
         try {
@@ -94,7 +94,7 @@ public class PhotoSenderApp extends JFrame {
                 "   • Listeden IP seçip sağ tık yaparak düzenleme/silme/default gösterme işlemleri yapın\n\n" +
                 "2. FOTOĞRAF SEÇİMİ:\n" +
                 "   • 'Fotoğraf Seç' butonu ile göndermek istediğiniz resmi seçin\n" +
-                "   • Desteklenen formatlar: JPG, JPEG, PNG, BMP\n\n" +
+                "   • Desteklenen formatlar: JPG, JPEG, PNG, BMP, GIF\n\n" +
                 "3. FOTOĞRAF GÖNDERİMİ:\n" +
                 "   • 'Hepsine Gönder': Listedeki tüm IP'lere fotoğraf gönderir\n" +
                 "   • 'Seçilene Gönder': Sadece seçili IP'ye fotoğraf gönderir\n" +
@@ -103,12 +103,8 @@ public class PhotoSenderApp extends JFrame {
                 "   • Tarih ve saat girişi ile tam kontrolü sizde\n" +
                 "   • Bitiş tarihi/saati: gg.aa.yyyy ss:dd formatında\n" +
                 "   • Fotoğraf belirlenen tarih/saatte otomatik olarak kaybolur\n\n" +
-                "5. İPUÇLARI:\n" +
-                "   • Büyük fotoğraflar otomatik olarak optimize edilir\n" +
-                "   • Gönderim sırasında ilerleme çubuğu gösterilir\n" +
-                "   • Hata durumlarında detaylı bilgi verilir\n" +
-                "   • Loglar APPDATA/PhotoSender klasöründe saklanır";
-                
+                "5. EKRAN GÖRÜNTÜSÜ ALMA:\n" +
+                "   • İlgili ip üzerinden sağ tık ile anlık veya canlı görüntü alabilirsiniz.\n\n";
             JTextArea textArea = new JTextArea(usageGuide);
             textArea.setEditable(false);
             textArea.setFont(new Font("Arial", Font.PLAIN, 12));
@@ -151,6 +147,17 @@ public class PhotoSenderApp extends JFrame {
             }
         });
         
+        // Ana pencereye click listener ekle (genel seçim kaldırma için)
+        addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                // Ana pencereye tıklandığında IP seçimini kaldır
+                if (ipJList != null) {
+                    ipJList.clearSelection();
+                }
+            }
+        });
+        
     logger.info("PhotoSender UI başlatıldı");
     // Uygulama açılışında sessiz (yeni sürüm varsa soran) kontrol
     UpdateManager.autoCheckForUpdates(this);
@@ -182,7 +189,13 @@ public class PhotoSenderApp extends JFrame {
                                 setBackground(new Color(230, 255, 230)); // Açık yeşil
                                 break;
                             case "Bağlantı Hatası":
+                            case "Zaman Aşımı":
+                            case "Bağlantı Reddedildi":
+                            case "Yanıt Yok":
                                 setBackground(new Color(255, 255, 200)); // Açık sarı
+                                break;
+                            case "Bilinmiyor":
+                                setBackground(new Color(240, 240, 240)); // Açık gri
                                 break;
                             default:
                                 setBackground(Color.WHITE);
@@ -193,7 +206,29 @@ public class PhotoSenderApp extends JFrame {
             }
         });
         
-        add(new JScrollPane(ipJList), BorderLayout.CENTER);
+        JScrollPane scrollPane = new JScrollPane(ipJList);
+        add(scrollPane, BorderLayout.CENTER);
+
+        // Boş yere tıklama için mouse listener ekle
+        ipJList.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                // Boş yere tıklandıysa seçimi kaldır
+                int index = ipJList.locationToIndex(e.getPoint());
+                if (index == -1 || !ipJList.getCellBounds(index, index).contains(e.getPoint())) {
+                    ipJList.clearSelection();
+                }
+            }
+        });
+        
+        // Scroll pane'e de click listener ekle (liste dışı alan için)
+        scrollPane.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                // ScrollPane'in kendisine tıklandıysa seçimi kaldır
+                ipJList.clearSelection();
+            }
+        });
 
         // Sağ tık menüsü ekle
         JPopupMenu popupMenu = new JPopupMenu();
@@ -259,8 +294,8 @@ public class PhotoSenderApp extends JFrame {
             SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
                 @Override
                 protected BufferedImage doInBackground() throws Exception {
-                    logger.info("Ultra kalite ekran görüntüsü alma işlemi başlatıldı: " + ip);
-                    return requestHDScreenshot(ip);
+                    logger.info("Yüksek kalite ekran görüntüsü alma işlemi başlatıldı: " + ip);
+                    return requestScreenshot(ip);
                 }
                 
                 @Override
@@ -270,7 +305,7 @@ public class PhotoSenderApp extends JFrame {
                         if (screenshot != null) {
                             logger.info("Ultra kalite ekran görüntüsü başarıyla alındı: " + name + " (" + ip + ") - Boyut: " + 
                                       screenshot.getWidth() + "x" + screenshot.getHeight() + " (HD Quality)");
-                            showScreenshotDialog(name + " (" + ip + ") - HD", screenshot);
+                            showScreenshotDialog(name + " (" + ip + ")", screenshot);
                         } else {
                             logger.warn("Ultra kalite ekran görüntüsü alınamadı (null response): " + ip);
                             JOptionPane.showMessageDialog(PhotoSenderApp.this, 
@@ -347,8 +382,23 @@ public class PhotoSenderApp extends JFrame {
                 for (IpList.IpEntry entry : ipList.getIpEntries()) {
                     ipListModel.addElement(entry);
                 }
+                
                 // IP'ler yüklendikten sonra durumları güncelle
-                SwingUtilities.invokeLater(() -> updateAllIPStatuses());
+                // İlk başlatmada PhotoViewer'ların başlaması için biraz bekle
+                if (ipList.getIpEntries().size() > 0) {
+                    logger.info(ipList.getIpEntries().size() + " IP yüklendi, durum sorgulaması başlatılıyor...");
+                    
+                    // Hemen bir durum güncellemesi yap
+                    SwingUtilities.invokeLater(() -> updateAllIPStatuses());
+                    
+                    // 5 saniye sonra tekrar kontrol et (PhotoViewer'ların başlaması için)
+                    javax.swing.Timer delayedCheck = new javax.swing.Timer(5000, _ -> {
+                        logger.info("Gecikmiş durum kontrolü başlatılıyor...");
+                        updateAllIPStatuses();
+                    });
+                    delayedCheck.setRepeats(false);
+                    delayedCheck.start();
+                }
             } catch (IOException ex) {
                 JOptionPane.showMessageDialog(this, AppMessages.formatIpReadError(ex.getMessage()));
             }
@@ -384,8 +434,27 @@ public class PhotoSenderApp extends JFrame {
                 String name = nameField.getText().trim();
                 if (!ip.isEmpty() && !name.isEmpty()) {
                     ipList.addIp(ip, name);
-                    ipListModel.addElement(new IpList.IpEntry(ip, name));
+                    IpList.IpEntry newEntry = new IpList.IpEntry(ip, name);
+                    ipListModel.addElement(newEntry);
                     logger.info("Yeni IP eklendi: " + name + " (" + ip + ")");
+                    
+                    // Yeni eklenen IP'nin durumunu hemen sorgula
+                    SwingWorker<Void, Void> statusWorker = new SwingWorker<Void, Void>() {
+                        @Override
+                        protected Void doInBackground() throws Exception {
+                            String status = queryIpStatus(ip);
+                            ipList.updateStatus(ip, status);
+                            logger.info("Yeni IP durum sorgulaması: " + name + " (" + ip + ") -> " + status);
+                            return null;
+                        }
+                        
+                        @Override
+                        protected void done() {
+                            ipJList.repaint();
+                        }
+                    };
+                    statusWorker.execute();
+                    
                     // IP listesini dosyaya kaydet
                     try {
                         ipList.saveToFile(IP_LIST_FILE);
@@ -474,15 +543,15 @@ public class PhotoSenderApp extends JFrame {
             updateAllIPStatuses();
         });
         
-        // Otomatik durum yenileme timer'ı - her 30 saniyede bir
-        statusRefreshTimer = new javax.swing.Timer(30000, _ -> {
+        // Otomatik durum yenileme timer'ı - her 10 saniyede bir
+        statusRefreshTimer = new javax.swing.Timer(STATUS_REFRESH_INTERVAL, _ -> {
             if (ipList.getIpEntries().size() > 0) {
                 updateAllIPStatuses();
             }
         });
         statusRefreshTimer.start();
         
-        logger.info("Otomatik durum yenileme başlatıldı (30 saniye aralıklarla)");
+        logger.info("Otomatik durum yenileme başlatıldı (10 saniye aralıklarla)");
     }
 
     private void sendPhotoToIps(File photo, List<IpList.IpEntry> entries) {
@@ -1196,23 +1265,6 @@ public class PhotoSenderApp extends JFrame {
             BorderFactory.createLineBorder(new Color(206, 212, 218), 1),
             BorderFactory.createEmptyBorder(2, 4, 2, 4)
         ));
-    }    private void sendWithDuration(IpList.IpEntry targetEntry, int durationSeconds, JDialog dialog) {
-        dialog.dispose();
-        
-        // Süreyi kullanıcıya göster
-        String durationText = formatDuration(durationSeconds);
-        logger.info("Zamanlı gönderim seçildi: " + durationText + " -> " + targetEntry.getName() + " (" + targetEntry.getIp() + ")");
-        
-        int confirm = JOptionPane.showConfirmDialog(this, 
-            "Fotoğraf " + durationText + " süreyle " + targetEntry.getName() + " (" + targetEntry.getIp() + ") adresine gönderilecek.\n\nDevam etmek istiyor musunuz?",
-            "Onay", JOptionPane.YES_NO_OPTION);
-            
-        if (confirm == JOptionPane.YES_OPTION) {
-            logger.info("Zamanlı gönderim onaylandı");
-            sendPhotoWithTimer(selectedPhoto, List.of(targetEntry), durationSeconds);
-        } else {
-            logger.info("Zamanlı gönderim iptal edildi");
-        }
     }
 
     private void sendWithSpecificDateTime(IpList.IpEntry targetEntry, java.util.Calendar targetDateTime, int durationSeconds, JDialog dialog) {
@@ -1272,7 +1324,7 @@ public class PhotoSenderApp extends JFrame {
 
     // Eski jar tabanlı güncelleme kodu kaldırıldı. Yeni MSI tabanlı sistem için UpdateManager kullanılmaktadır.
 
-    // Bir IP'nin durumunu sorgula
+    // Bir IP'nin durumunu sorgula - geliştirilmiş versiyon
     private String queryIpStatus(String ip) {
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(ip, AppConstants.DEFAULT_PORT), AppConstants.CONNECTION_TIMEOUT_MS);
@@ -1287,32 +1339,85 @@ public class PhotoSenderApp extends JFrame {
                 String response = reader.readLine();
                 if (response != null && response.startsWith("STATUS:")) {
                     String status = response.substring(7).trim();
-                    return status.isEmpty() ? "Default" : status;
+                    
+                    // Status mapping - PhotoViewer'dan gelen yanıtları normalize et
+                    if (status.isEmpty() || "Default".equalsIgnoreCase(status) || "DEFAULT".equals(status)) {
+                        return "Default";
+                    } else if ("Toplantı Var".equalsIgnoreCase(status) || "MEETING".equalsIgnoreCase(status) || "CUSTOM".equalsIgnoreCase(status)) {
+                        return "Toplantı Var";
+                    } else {
+                        // Bilinmeyen durum için default kabul et
+                        logger.warn("Bilinmeyen durum yanıtı: " + status + " (IP: " + ip + ")");
+                        return status; // Orjinal yanıtı göster
+                    }
+                } else {
+                    logger.warn("Geçersiz durum yanıtı: " + response + " (IP: " + ip + ")");
+                    return "Yanıt Yok";
                 }
-                return "Yanıt Yok";
             }
+        } catch (java.net.SocketTimeoutException e) {
+            return "Zaman Aşımı";
+        } catch (java.net.ConnectException e) {
+            return "Bağlantı Reddedildi";
         } catch (Exception e) {
             return "Bağlantı Hatası";
         }
     }
 
-    // Tüm IP'lerin durumunu güncelle
+    // Tüm IP'lerin durumunu güncelle - geliştirilmiş versiyon
     private void updateAllIPStatuses() {
         SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
                 List<IpList.IpEntry> entries = ipList.getIpEntries();
-                for (IpList.IpEntry entry : entries) {
-                    String status = queryIpStatus(entry.getIp());
-                    ipList.updateStatus(entry.getIp(), status);
+                
+                if (entries.isEmpty()) {
+                    return null;
                 }
+                
+                // Paralel işleme için ExecutorService kullan
+                ExecutorService executor = Executors.newFixedThreadPool(Math.min(5, entries.size()));
+                List<Future<Void>> futures = new ArrayList<>();
+                
+                for (IpList.IpEntry entry : entries) {
+                    Future<Void> future = executor.submit(() -> {
+                        try {
+                            String oldStatus = entry.getStatus();
+                            String newStatus = queryIpStatus(entry.getIp());
+                            
+                            if (!newStatus.equals(oldStatus)) {
+                                logger.info("IP " + entry.getIp() + " (" + entry.getName() + ") durum değişti: " + oldStatus + " -> " + newStatus);
+                            }
+                            
+                            ipList.updateStatus(entry.getIp(), newStatus);
+                        } catch (Exception e) {
+                            logger.error("IP " + entry.getIp() + " durum güncelleme hatası", e);
+                        }
+                        return null;
+                    });
+                    futures.add(future);
+                }
+                
+                // Tüm görevlerin tamamlanmasını bekle
+                for (Future<Void> future : futures) {
+                    try {
+                        future.get(AppConstants.CONNECTION_TIMEOUT_MS * 2, TimeUnit.MILLISECONDS);
+                    } catch (Exception e) {
+                        // Sessizce devam et
+                    }
+                }
+                
+                executor.shutdown();
                 return null;
             }
             
             @Override
             protected void done() {
                 // UI'ı güncelle
-                ipJList.repaint();
+                SwingUtilities.invokeLater(() -> {
+                    ipJList.repaint();
+                    ipJList.revalidate();
+                });
             }
         };
         worker.execute();
@@ -1320,18 +1425,15 @@ public class PhotoSenderApp extends JFrame {
 
     // Screenshot isteme metodu
     private BufferedImage requestScreenshot(String ip) {
-        logger.debug("Bağlantı kuruluyor: " + ip + ":" + AppConstants.DEFAULT_PORT);
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(ip, AppConstants.DEFAULT_PORT), AppConstants.CONNECTION_TIMEOUT_MS);
             socket.setSoTimeout(AppConstants.READ_TIMEOUT_MS);
-            logger.debug("Bağlantı başarılı: " + ip);
             
             // OutputStream'i al
             OutputStream outputStream = socket.getOutputStream();
             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream));
             
             // Screenshot isteği gönder
-            logger.debug("Screenshot komutu gönderiliyor: " + AppConstants.COMMAND_GET_SCREENSHOT);
             writer.write(AppConstants.COMMAND_GET_SCREENSHOT + "\n");
             writer.flush();
             
@@ -1348,11 +1450,9 @@ public class PhotoSenderApp extends JFrame {
             }
             
             String response = headerBuilder.toString();
-            logger.debug("Screenshot yanıtı alındı: " + response);
             
             if (response.startsWith("SCREENSHOT:")) {
                 int dataSize = Integer.parseInt(response.substring(11).trim());
-                logger.debug("Screenshot veri boyutu: " + dataSize + " byte (" + (dataSize / 1024) + " KB)");
                 
                 // Binary veriyi oku
                 byte[] imageData = new byte[dataSize];
@@ -1363,8 +1463,6 @@ public class PhotoSenderApp extends JFrame {
                     totalRead += bytesRead;
                 }
                 
-                logger.debug("Screenshot verisi okundu: " + totalRead + "/" + dataSize + " byte");
-                
                 if (totalRead != dataSize) {
                     logger.warn("Screenshot veri boyutu uyumsuz - Beklenen: " + dataSize + ", Okunan: " + totalRead);
                 }
@@ -1374,7 +1472,6 @@ public class PhotoSenderApp extends JFrame {
                 BufferedImage result = ImageIO.read(bais);
                 
                 if (result != null) {
-                    logger.debug("Screenshot başarıyla decode edildi: " + result.getWidth() + "x" + result.getHeight());
                 } else {
                     logger.error("Screenshot decode hatası - Image null");
                 }
@@ -1390,79 +1487,8 @@ public class PhotoSenderApp extends JFrame {
         }
     }
 
-    // HD Screenshot isteme metodu (tek görüntü için ultra kalite)
-    private BufferedImage requestHDScreenshot(String ip) {
-        logger.debug("HD Screenshot bağlantı kuruluyor: " + ip + ":" + AppConstants.DEFAULT_PORT);
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(ip, AppConstants.DEFAULT_PORT), AppConstants.CONNECTION_TIMEOUT_MS);
-            socket.setSoTimeout(AppConstants.READ_TIMEOUT_MS);
-            logger.debug("HD Screenshot bağlantı başarılı: " + ip);
-            
-            // OutputStream'i al
-            OutputStream outputStream = socket.getOutputStream();
-            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream));
-            
-            // HD Screenshot isteği gönder
-            logger.debug("HD Screenshot komutu gönderiliyor: " + AppConstants.COMMAND_GET_SCREENSHOT_HD);
-            writer.write(AppConstants.COMMAND_GET_SCREENSHOT_HD + "\n");
-            writer.flush();
-            
-            // InputStream'i direkt al (BufferedReader kullanma!)
-            InputStream inputStream = socket.getInputStream();
-            
-            // Header oku - satır satır okuma için
-            StringBuilder headerBuilder = new StringBuilder();
-            int c;
-            while ((c = inputStream.read()) != -1 && c != '\n') {
-                if (c != '\r') { // CR karakterini atla
-                    headerBuilder.append((char)c);
-                }
-            }
-            
-            String response = headerBuilder.toString();
-            logger.debug("HD Screenshot yanıtı alındı: " + response);
-            
-            if (response.startsWith("SCREENSHOT:")) {
-                int dataSize = Integer.parseInt(response.substring(11).trim());
-                logger.debug("HD Screenshot veri boyutu: " + dataSize + " byte (" + (dataSize / 1024) + " KB)");
-                
-                // Binary veriyi oku
-                byte[] imageData = new byte[dataSize];
-                int totalRead = 0;
-                while (totalRead < dataSize) {
-                    int bytesRead = inputStream.read(imageData, totalRead, dataSize - totalRead);
-                    if (bytesRead == -1) break;
-                    totalRead += bytesRead;
-                }
-                
-                logger.debug("HD Screenshot verisi okundu: " + totalRead + "/" + dataSize + " byte");
-                
-                if (totalRead != dataSize) {
-                    logger.warn("HD Screenshot veri boyutu uyumsuz - Beklenen: " + dataSize + ", Okunan: " + totalRead);
-                }
-                
-                // Byte array'den BufferedImage'e çevir
-                ByteArrayInputStream bais = new ByteArrayInputStream(imageData);
-                BufferedImage result = ImageIO.read(bais);
-                
-                if (result != null) {
-                    logger.debug("HD Screenshot başarıyla decode edildi: " + result.getWidth() + "x" + result.getHeight());
-                } else {
-                    logger.error("HD Screenshot decode hatası - Image null");
-                }
-                
-                return result;
-            } else {
-                logger.error("Geçersiz HD screenshot yanıtı: " + response);
-            }
-            return null;
-        } catch (Exception e) {
-            logger.error("HD Screenshot alma bağlantı hatası: " + ip + " - " + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            return null;
-        }
-    }
-
     // Screenshot gösterme dialog'u - Dinamik boyut ve en iyi kalite
+    // Screenshot gösterme dialog'u - Otomatik en iyi kalite boyutlandırması
     private void showScreenshotDialog(String title, BufferedImage screenshot) {
         logger.info("Screenshot dialog açılıyor: " + title + " - Orijinal boyut: " + 
                    screenshot.getWidth() + "x" + screenshot.getHeight());
@@ -1470,149 +1496,84 @@ public class PhotoSenderApp extends JFrame {
         JDialog dialog = new JDialog(this, title, true);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         
-        // Ekran boyutuna göre dinamik pencere boyutu (ekranın %80'i max)
+        // Ekran boyutunu al
         Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-        int maxWindowWidth = (int)(screenSize.width * 0.8);
-        int maxWindowHeight = (int)(screenSize.height * 0.8);
         
-        // Minimum boyut da belirle (çok küçük ekranlar için)
-        int minWindowWidth = 800;
-        int minWindowHeight = 600;
+        // Otomatik en iyi boyutlandırma - resmin kalitesine göre
+        // Eğer resim zaten yüksek çözünürlüklüyse, ekranın %90'ını kullan
+        // Düşük çözünürlüklüyse, orijinal boyutunu koru ama maksimum sınır koy
         
-        int windowWidth = Math.max(minWindowWidth, Math.min(maxWindowWidth, screenshot.getWidth() + 50));
-        int windowHeight = Math.max(minWindowHeight, Math.min(maxWindowHeight, screenshot.getHeight() + 100));
+        double screenRatio = 0.9; // Ekranın %90'ını kullan
+        int maxDisplayWidth = (int)(screenSize.width * screenRatio);
+        int maxDisplayHeight = (int)(screenSize.height * screenRatio) - 100; // Title bar ve butonlar için
         
-        logger.debug("Dinamik pencere boyutu: " + windowWidth + "x" + windowHeight + 
-                    " (Ekran: " + screenSize.width + "x" + screenSize.height + ")");
+        // Resmin boyutuna göre otomatik scaling
+        double scaleX = (double)maxDisplayWidth / screenshot.getWidth();
+        double scaleY = (double)maxDisplayHeight / screenshot.getHeight();
+        double scale = Math.min(scaleX, scaleY);
         
-        // Screenshot'ı pencereye sığacak şekilde ölçeklendir
-        int availableWidth = windowWidth - 40; // Margin için
-        int availableHeight = windowHeight - 100; // Buton paneli için
+        // Eğer resim çok küçükse büyütme (1.0'dan küçükse), ama max 2x büyütme
+        if (scale > 2.0) scale = 2.0;
         
-        double scaleX = (double)availableWidth / screenshot.getWidth();
-        double scaleY = (double)availableHeight / screenshot.getHeight();
-        double scale = Math.min(scaleX, scaleY); // En küçük oranı al (aspect ratio korunsun)
+        // En az %25 ölçeklendirme (çok büyük resimler için)
+        if (scale < 0.25) scale = 0.25;
         
-        // Eğer orijinal görüntü küçükse büyütme (1.0'dan büyük scale)
-        scale = Math.min(scale, 1.0); // Maksimum %100 boyut
+        int displayWidth = (int)(screenshot.getWidth() * scale);
+        int displayHeight = (int)(screenshot.getHeight() * scale);
         
-        int scaledWidth = (int)(screenshot.getWidth() * scale);
-        int scaledHeight = (int)(screenshot.getHeight() * scale);
+        logger.info("Otomatik boyutlandırma: " + screenshot.getWidth() + "x" + screenshot.getHeight() + 
+                   " -> " + displayWidth + "x" + displayHeight + " (ölçek: " + String.format("%.2f", scale) + ")");
         
-        logger.debug("Screenshot ölçeklendirme: " + screenshot.getWidth() + "x" + screenshot.getHeight() + 
-                    " -> " + scaledWidth + "x" + scaledHeight + " (ölçek: " + String.format("%.2f", scale) + ")");
-        
-        // En yüksek kaliteli scaling - Bicubic interpolation
-        BufferedImage scaledImage = new BufferedImage(scaledWidth, scaledHeight, BufferedImage.TYPE_INT_RGB);
+        // En yüksek kaliteli ölçeklendirme
+        BufferedImage scaledImage = new BufferedImage(displayWidth, displayHeight, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2d = scaledImage.createGraphics();
         
-        // Ultra kalite rendering hints
+        // En iyi kalite ayarları
         g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
         g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
         g2d.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE);
         
-        g2d.drawImage(screenshot, 0, 0, scaledWidth, scaledHeight, null);
+        g2d.drawImage(screenshot, 0, 0, displayWidth, displayHeight, null);
         g2d.dispose();
         
-        ImageIcon icon = new ImageIcon(scaledImage);
-        
-        JLabel imageLabel = new JLabel(icon);
+        // Resmi göster
+        JLabel imageLabel = new JLabel(new ImageIcon(scaledImage));
         imageLabel.setHorizontalAlignment(JLabel.CENTER);
         imageLabel.setVerticalAlignment(JLabel.CENTER);
         
-        // ScrollPane ekle - büyük görüntüler için
         JScrollPane scrollPane = new JScrollPane(imageLabel);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-        scrollPane.setPreferredSize(new Dimension(availableWidth, availableHeight));
         
         dialog.add(scrollPane, BorderLayout.CENTER);
         
-        // Gelişmiş buton paneli
+        // Sadece Kapat butonu
         JButton closeButton = new JButton("Kapat");
-        closeButton.addActionListener(_ -> {
-            logger.debug("Screenshot dialog kapatılıyor: " + title);
-            dialog.dispose();
-        });
-        
-        JButton fullScreenButton = new JButton("Tam Ekran");
-        final boolean[] isFullScreen = {false}; // Tam ekran durumunu takip et
-        
-        fullScreenButton.addActionListener(_ -> {
-            if (!isFullScreen[0]) {
-                // TAM EKRAN YAP - Resmi de tam ekrana sığdır
-                Dimension fullScreenSize = Toolkit.getDefaultToolkit().getScreenSize();
-                
-                // Resmi tam ekran boyutuna göre yeniden ölçeklendir
-                double fullScaleX = (double)(fullScreenSize.width - 20) / screenshot.getWidth();
-                double fullScaleY = (double)(fullScreenSize.height - 80) / screenshot.getHeight(); // Buton paneli için
-                double fullScale = Math.min(fullScaleX, fullScaleY);
-                
-                int fullScaledWidth = (int)(screenshot.getWidth() * fullScale);
-                int fullScaledHeight = (int)(screenshot.getHeight() * fullScale);
-                
-                logger.debug("Tam ekran ölçeklendirme: " + fullScaledWidth + "x" + fullScaledHeight);
-                
-                // Ultra yüksek kaliteli tam ekran scaling
-                BufferedImage fullScreenImage = new BufferedImage(fullScaledWidth, fullScaledHeight, BufferedImage.TYPE_INT_RGB);
-                Graphics2D g2dFull = fullScreenImage.createGraphics();
-                
-                // En yüksek kalite - tam ekran için
-                g2dFull.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                g2dFull.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-                g2dFull.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2dFull.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
-                g2dFull.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
-                
-                g2dFull.drawImage(screenshot, 0, 0, fullScaledWidth, fullScaledHeight, null);
-                g2dFull.dispose();
-                
-                // Yeni icon oluştur ve label'ı güncelle
-                ImageIcon fullScreenIcon = new ImageIcon(fullScreenImage);
-                imageLabel.setIcon(fullScreenIcon);
-                
-                // Dialog'u tam ekran yap
-                dialog.setSize(fullScreenSize);
-                dialog.setLocation(0, 0);
-                fullScreenButton.setText("Normal Boyut");
-                isFullScreen[0] = true;
-                
-                logger.success("Resim tam ekrana ölçeklendirildi: " + fullScaledWidth + "x" + fullScaledHeight);
-                
-            } else {
-                // NORMAL BOYUTA DÖNDÜR
-                dialog.setSize(windowWidth, windowHeight);
-                dialog.setLocationRelativeTo(this);
-                
-                // Orijinal ölçeklenmiş resmi geri yükle
-                imageLabel.setIcon(icon);
-                
-                fullScreenButton.setText("Tam Ekran");
-                isFullScreen[0] = false;
-                logger.debug("Dialog normal boyuta döndürüldü");
-            }
-        });
+        closeButton.addActionListener(_ -> dialog.dispose());
         
         JPanel buttonPanel = new JPanel(new FlowLayout());
-        buttonPanel.add(fullScreenButton);
         buttonPanel.add(closeButton);
         dialog.add(buttonPanel, BorderLayout.SOUTH);
         
-        // Dialog'u resize edilebilir yap
-        dialog.setResizable(true);
+        // Dialog boyutunu içeriğe göre ayarla
+        int windowWidth = displayWidth + 50; // Margin için
+        int windowHeight = displayHeight + 100; // Buton paneli için
         
-        // Dialog boyutunu ayarla
+        // Minimum boyut kontrolü
+        windowWidth = Math.max(400, Math.min(windowWidth, screenSize.width));
+        windowHeight = Math.max(300, Math.min(windowHeight, screenSize.height));
+        
         dialog.setSize(windowWidth, windowHeight);
         dialog.setLocationRelativeTo(this);
-        
-        logger.debug("Screenshot dialog gösteriliyor - Pencere boyutu: " + windowWidth + "x" + windowHeight + " (resizable)");
         dialog.setVisible(true);
-        logger.debug("Screenshot dialog kapatıldı: " + title);
+        
+        logger.info("Screenshot dialog kapatıldı: " + title);
     }
 
-    // Canlı ekran izleme başlat
+    // Canlı ekran izleme başlat - Otomatik en iyi kalite boyutlandırması
     private void startLiveView(String ip, String name) {
         // Eğer başka bir canlı izleme açıksa kapat
         stopLiveView();
@@ -1624,12 +1585,12 @@ public class PhotoSenderApp extends JFrame {
         liveViewDialog = new JDialog(this, "Canlı İzleme: " + name + " (" + ip + ")", true);
         liveViewDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
         
-        // Dinamik pencere boyutu - canlı izleme için (ekranın %70'i)
+        // Otomatik en iyi boyutlandırma - canlı izleme için ekranın %80'i
         Dimension screenSizeLive = Toolkit.getDefaultToolkit().getScreenSize();
-        final int windowWidth = Math.max(800, (int)(screenSizeLive.width * 0.7));
-        final int windowHeight = Math.max(600, (int)(screenSizeLive.height * 0.7));
+        final int windowWidth = Math.max(800, (int)(screenSizeLive.width * 0.8));
+        final int windowHeight = Math.max(600, (int)(screenSizeLive.height * 0.8));
         
-        logger.debug("Canlı izleme dinamik boyut: " + windowWidth + "x" + windowHeight);
+        logger.info("Canlı izleme otomatik boyutlandırma: " + windowWidth + "x" + windowHeight);
         
         // Image label oluştur
         liveImageLabel = new JLabel("Canlı görüntü yükleniyor...", JLabel.CENTER);
@@ -1643,53 +1604,21 @@ public class PhotoSenderApp extends JFrame {
         
         liveViewDialog.add(liveScrollPane, BorderLayout.CENTER);
         
-        // Gelişmiş butonlar
+        // Sadece Durdur butonu
         JButton stopButton = new JButton("Durdur");
         stopButton.addActionListener(_ -> {
             logger.info("Canlı izleme durduruldu: " + name + " (" + ip + ")");
             stopLiveView();
         });
         
-        JButton liveFullScreenButton = new JButton("Tam Ekran");
-        liveFullScreenButton.addActionListener(_ -> {
-            if (!isLiveViewFullScreen) {
-                // TAM EKRAN YAP
-                Dimension fullScreenSizeLive = Toolkit.getDefaultToolkit().getScreenSize();
-                liveViewDialog.setSize(fullScreenSizeLive);
-                liveViewDialog.setLocation(0, 0);
-                liveFullScreenButton.setText("Normal Boyut");
-                isLiveViewFullScreen = true;
-                
-                logger.success("Canlı izleme tam ekran aktivated - resim otomatik ölçeklenecek");
-                
-                // Mevcut görüntü varsa hemen tam ekrana ölçeklendir
-                updateLiveView();
-                
-            } else {
-                // NORMAL BOYUTA DÖNDÜR
-                liveViewDialog.setSize(windowWidth, windowHeight);
-                liveViewDialog.setLocationRelativeTo(this);
-                liveFullScreenButton.setText("Tam Ekran");
-                isLiveViewFullScreen = false;
-                
-                logger.debug("Canlı izleme normal boyuta döndürüldü");
-                
-                // Mevcut görüntü varsa normal boyuta ölçeklendir
-                updateLiveView();
-            }
-        });
-        
         JPanel buttonPanel = new JPanel(new FlowLayout());
-        buttonPanel.add(liveFullScreenButton);
         buttonPanel.add(stopButton);
         liveViewDialog.add(buttonPanel, BorderLayout.SOUTH);
         
-        // Dialog'u resize edilebilir yap
-        liveViewDialog.setResizable(true);
-        
         // Dialog boyutu ve pozisyon
-        liveViewDialog.setSize(windowWidth + 20, windowHeight + 80);
+        liveViewDialog.setSize(windowWidth, windowHeight);
         liveViewDialog.setLocationRelativeTo(this);
+        liveViewDialog.setResizable(true);
         
         // Kapanma işlemi için listener
         liveViewDialog.addWindowListener(new java.awt.event.WindowAdapter() {
@@ -1699,11 +1628,11 @@ public class PhotoSenderApp extends JFrame {
             }
         });
         
-        // Timer başlat (2 saniye aralık - sistem kaynaklarını korur)
+        // Timer başlat (2 saniye aralık)
         liveViewTimer = new javax.swing.Timer(2000, _ -> updateLiveView());
         liveViewTimer.start();
         
-        logger.success("Canlı ekran izleme başlatıldı - Güncelleme aralığı: 2 saniye (optimized)");
+        logger.info("Canlı ekran izleme başlatıldı - Güncelleme aralığı: 2 saniye");
         
         // İlk screenshot'ı hemen al
         updateLiveView();
@@ -1728,10 +1657,9 @@ public class PhotoSenderApp extends JFrame {
         liveImageLabel = null;
         currentLiveViewIp = null;
         currentLiveViewName = null;
-        isLiveViewFullScreen = false; // Reset tam ekran durumu
     }
     
-    // Canlı görüntüyü güncelle
+    // Canlı görüntüyü güncelle - Otomatik en iyi kalite boyutlandırması
     private void updateLiveView() {
         if (currentLiveViewIp == null || liveImageLabel == null) {
             return;
@@ -1749,44 +1677,34 @@ public class PhotoSenderApp extends JFrame {
                 try {
                     BufferedImage screenshot = get();
                     if (screenshot != null && liveImageLabel != null) {
-                        // TAM EKRAN / NORMAL MOD AYARLI DİNAMİK ÖLÇEKLENDİRME
+                        // Otomatik en iyi kalite boyutlandırması
                         Dimension currentDialogSize = liveViewDialog.getSize();
                         
-                        int availableWidth, availableHeight;
-                        if (isLiveViewFullScreen) {
-                            // Tam ekran modunda maksimum alan kullan
-                            availableWidth = currentDialogSize.width - 20; // Minimal margin
-                            availableHeight = currentDialogSize.height - 60; // Minimal buton paneli
-                            logger.debug("Canlı izleme TAM EKRAN ölçeklendirme - Alan: " + availableWidth + "x" + availableHeight);
-                        } else {
-                            // Normal modda standart margin
-                            availableWidth = currentDialogSize.width - 40;
-                            availableHeight = currentDialogSize.height - 100;
-                        }
+                        // Dialog'da kullanılabilir alan hesapla
+                        int availableWidth = currentDialogSize.width - 40; // Margin için
+                        int availableHeight = currentDialogSize.height - 100; // Buton paneli için
                         
+                        // Resmin boyutuna göre otomatik scaling
                         double scaleX = (double)availableWidth / screenshot.getWidth();
                         double scaleY = (double)availableHeight / screenshot.getHeight();
                         double scale = Math.min(scaleX, scaleY);
                         
+                        // Minimum %25, maksimum %200 ölçeklendirme
+                        if (scale > 2.0) scale = 2.0;
+                        if (scale < 0.25) scale = 0.25;
+                        
                         int scaledWidth = (int)(screenshot.getWidth() * scale);
                         int scaledHeight = (int)(screenshot.getHeight() * scale);
                         
-                        // Tam ekran için ultra kalite, normal mod için hızlı kalite
+                        // En yüksek kaliteli scaling - canlı izleme için optimize
                         BufferedImage scaledImage = new BufferedImage(scaledWidth, scaledHeight, BufferedImage.TYPE_INT_RGB);
                         Graphics2D g2d = scaledImage.createGraphics();
                         
-                        if (isLiveViewFullScreen) {
-                            // TAM EKRAN - ULTRA KALİTE
-                            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-                            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                            g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
-                        } else {
-                            // NORMAL MOD - HIZ VE KALİTE DENGESİ
-                            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-                            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                        }
+                        // Yüksek kalite ayarları
+                        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                        g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
                         
                         g2d.drawImage(screenshot, 0, 0, scaledWidth, scaledHeight, null);
                         g2d.dispose();
@@ -1800,9 +1718,8 @@ public class PhotoSenderApp extends JFrame {
                             }
                         });
                         
-                        logger.debug("Canlı görüntü güncellendi: " + currentLiveViewName + " - " + 
-                                   scaledWidth + "x" + scaledHeight + 
-                                   (isLiveViewFullScreen ? " (TAM EKRAN - ULTRA KALİTE)" : " (NORMAL - HIZ/KALİTE DENGESİ)"));
+                        logger.info("Canlı görüntü güncellendi: " + currentLiveViewName + " - " + 
+                                   scaledWidth + "x" + scaledHeight + " (ölçek: " + String.format("%.2f", scale) + ")");
                     } else {
                         SwingUtilities.invokeLater(() -> {
                             if (liveImageLabel != null) {
@@ -1828,7 +1745,19 @@ public class PhotoSenderApp extends JFrame {
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
-            new PhotoSenderApp().setVisible(true);
+            PhotoSenderApp app = new PhotoSenderApp();
+            app.setVisible(true);
+            
+            // Uygulama tamamen yüklendikten 10 saniye sonra bir kez daha durum kontrolü yap
+            // Bu, PhotoViewer'ların tam olarak başlaması için zaman tanır
+            javax.swing.Timer startupStatusCheck = new javax.swing.Timer(10000, _ -> {
+                if (app.ipList.getIpEntries().size() > 0) {
+                    logger.info("Başlangıç durum kontrolü başlatılıyor...");
+                    app.updateAllIPStatuses();
+                }
+            });
+            startupStatusCheck.setRepeats(false);
+            startupStatusCheck.start();
         });
     }
 }
