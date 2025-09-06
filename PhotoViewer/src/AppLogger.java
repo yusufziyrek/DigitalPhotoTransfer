@@ -81,6 +81,13 @@ public class AppLogger {
     }
     
     /**
+     * DEBUG seviyesinde log (detaylı bilgiler için)
+     */
+    public void debug(String message) {
+        log("DEBUG", message);
+    }
+    
+    /**
      * WARN seviyesinde log
      */
     public void warn(String message) {

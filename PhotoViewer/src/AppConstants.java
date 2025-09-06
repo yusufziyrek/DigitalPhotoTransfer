@@ -10,7 +10,7 @@
 public final class AppConstants {
     
     // Versiyon ve Uygulama Bilgileri
-    public static final String VERSION = "1.0.6";
+    public static final String VERSION = "1.0.8";
     public static final String APP_TITLE = "PhotoViewer - Wyndham Grand Istanbul Europe";
     public static final String CONTACT_EMAIL = "yusufziyrek1@gmail.com";
     public static final String COPYRIGHT = "© 2025 Yusuf Ziyrek";
@@ -19,7 +19,7 @@ public final class AppConstants {
     public static final int DEFAULT_PORT = 5000;
     public static final int SOCKET_TIMEOUT_MS = 10000;
     public static final int CONNECTION_TIMEOUT_MS = 10000;
-    public static final int READ_TIMEOUT_MS = 30000;
+    public static final int READ_TIMEOUT_MS = 15000; // PhotoSender ile uyumlu hale getirildi
     public static final int PUSHBACK_BUFFER_SIZE = 8192;
     
     // Time Constants for compatibility with PhotoSender
@@ -50,7 +50,7 @@ public final class AppConstants {
     public static final java.awt.Color IMAGE_BACKGROUND_COLOR = java.awt.Color.BLACK;
     
     // File Extensions
-    public static final String[] SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"};
+    public static final String[] SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif"};
     
     // Configuration Keys
     public static final String CONFIG_MODE_KEY = "mode";
@@ -67,8 +67,16 @@ public final class AppConstants {
     public static final String COMMAND_SHOW_DEFAULT = "SHOW_DEFAULT";
     public static final String COMMAND_SEND_PHOTO = "SEND_PHOTO:";
     public static final String COMMAND_SEND_PHOTO_WITH_TIMER = "SEND_PHOTO_WITH_TIMER:";
+    public static final String COMMAND_GET_STATUS = "GET_STATUS";
+    public static final String COMMAND_GET_SCREENSHOT = "GET_SCREENSHOT";
+    public static final String COMMAND_GET_SCREENSHOT_HD = "GET_SCREENSHOT_HD"; // Ultra kalite için
     public static final String RESPONSE_OK = "OK\n";
     public static final String RESPONSE_ERROR = "ERR\n";
+    
+    // Status Response Values
+    public static final String STATUS_DEFAULT = "DEFAULT";
+    public static final String STATUS_MEETING = "MEETING";
+    public static final String STATUS_CUSTOM = "CUSTOM";
     
     // GitHub API Configuration
     public static final String GITHUB_API_URL = "https://api.github.com/repos/yusufziyrek/DigitalPhotoTransfer/releases/latest";

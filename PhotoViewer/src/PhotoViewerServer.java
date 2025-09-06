@@ -11,8 +11,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import javax.imageio.ImageIO;
 import java.util.Properties;
-import java.net.URISyntaxException;
-import java.nio.file.Path;
+import java.awt.Robot;
 
 public class PhotoViewerServer {
     private static final AppLogger logger = new AppLogger("PhotoViewer");
@@ -51,9 +50,8 @@ public class PhotoViewerServer {
         });
 
         // Config dosyası ve otomatik/manuel tercihlerin yönetimi
-    File appDir = getAppDirectory();
-    if (appDir == null) appDir = new File(System.getProperty("user.dir"));
-    File configFile = getConfigFile();
+        File configFile = getConfigFile();
+        File appDir = new File(System.getProperty("user.dir")); // Basitleştirildi
 
         BufferedImage defaultImage = null;
 
@@ -125,7 +123,7 @@ public class PhotoViewerServer {
             // otomatik modda bulunamadıysa fallback bilgi
             photoPanel.setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
         } else if (defaultImage != null) {
-            photoPanel.setImage(defaultImage);
+            photoPanel.setImage(defaultImage, true); // Default olarak işaretle
         } else {
             // MANUAL modu ama kaydedilmiş yok -> gösterici ile manuel seçim
             try {
@@ -136,7 +134,7 @@ public class PhotoViewerServer {
                     try {
                         defaultImage = ImageIO.read(selectedFile);
                         if (defaultImage != null) {
-                            photoPanel.setImage(defaultImage);
+                            photoPanel.setImage(defaultImage, true); // Default olarak işaretle
                             logger.info("Manuel resim seçimi başarılı: " + selectedFile.getName());
                         } else {
                             photoPanel.setInfo(AppConstants.PHOTO_LOAD_ERROR_MESSAGE);
@@ -184,10 +182,88 @@ public class PhotoViewerServer {
                         if (defaultImage != null) {
                             logger.success("Default fotoğraf gösteriliyor");
                             System.out.println("Default fotoğraf gösteriliyor.");
-                            photoPanel.setImage(defaultImage);
+                            photoPanel.setImage(defaultImage, true); // Default olarak işaretle
                         } else {
                             logger.warn("Default fotoğraf bulunamadı");
                             photoPanel.setInfo(AppConstants.NO_DEFAULT_PHOTO_MESSAGE);
+                        }
+                    } else if (command != null && command.equals(AppConstants.COMMAND_GET_STATUS)) {
+                        // Durum sorgulama
+                        try {
+                            String status = photoPanel.getStatusDetails();
+                            OutputStream out = clientSocket.getOutputStream();
+                            BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(out, "UTF-8"));
+                            bw.write("STATUS:" + status + "\n");
+                            bw.flush();
+                            logger.info("Durum bilgisi gönderildi: " + status + " (Kaynak: " + clientIP + ")");
+                            System.out.println("Durum sorgulandı: " + status);
+                        } catch (Exception ex) {
+                            logger.error("Durum bilgisi gönderilemedi", ex);
+                            System.out.println("Durum bilgisi gönderilemedi: " + ex.getMessage());
+                        }
+                    } else if (command != null && command.equals(AppConstants.COMMAND_GET_SCREENSHOT)) {
+                        // Screenshot sorgulama
+                        try {
+                            logger.info("Screenshot isteği alındı - Kaynak: " + clientIP);
+                            long startTime = System.currentTimeMillis();
+                            
+                            byte[] screenshotData = captureScreenshot();
+                            long captureTime = System.currentTimeMillis() - startTime;
+                            
+                            logger.debug("Screenshot yakalandı: " + screenshotData.length + " byte (" + 
+                                       (screenshotData.length / 1024) + " KB) - Süre: " + captureTime + "ms");
+                            
+                            OutputStream out = clientSocket.getOutputStream();
+                            
+                            // Önce boyutu gönder
+                            String header = "SCREENSHOT:" + screenshotData.length + "\n";
+                            logger.debug("Screenshot header gönderiliyor: " + header.trim());
+                            out.write(header.getBytes("UTF-8"));
+                            out.flush();
+                            
+                            // Sonra screenshot verisini gönder
+                            long transferStart = System.currentTimeMillis();
+                            out.write(screenshotData);
+                            out.flush();
+                            long transferTime = System.currentTimeMillis() - transferStart;
+                            
+                            long totalTime = System.currentTimeMillis() - startTime;
+                            logger.success("Screenshot başarıyla gönderildi - Boyut: " + (screenshotData.length / 1024) + " KB, " +
+                                         "Yakalama: " + captureTime + "ms, Transfer: " + transferTime + "ms, Toplam: " + totalTime + "ms");
+                        } catch (Exception ex) {
+                            logger.error("Screenshot gönderim hatası - Kaynak: " + clientIP + " - " + ex.getClass().getSimpleName() + ": " + ex.getMessage(), ex);
+                        }
+                    } else if (command != null && command.equals(AppConstants.COMMAND_GET_SCREENSHOT_HD)) {
+                        // Ultra yüksek kaliteli screenshot sorgulama
+                        try {
+                            logger.info("Ultra kalite screenshot isteği alındı - Kaynak: " + clientIP);
+                            long startTime = System.currentTimeMillis();
+                            
+                            byte[] screenshotData = captureHighQualityScreenshot();
+                            long captureTime = System.currentTimeMillis() - startTime;
+                            
+                            logger.debug("Ultra kalite screenshot yakalandı: " + screenshotData.length + " byte (" + 
+                                       (screenshotData.length / 1024) + " KB) - Süre: " + captureTime + "ms");
+                            
+                            OutputStream out = clientSocket.getOutputStream();
+                            
+                            // Önce boyutu gönder
+                            String header = "SCREENSHOT:" + screenshotData.length + "\n";
+                            logger.debug("Ultra kalite header gönderiliyor: " + header.trim());
+                            out.write(header.getBytes("UTF-8"));
+                            out.flush();
+                            
+                            // Sonra screenshot verisini gönder
+                            long transferStart = System.currentTimeMillis();
+                            out.write(screenshotData);
+                            out.flush();
+                            long transferTime = System.currentTimeMillis() - transferStart;
+                            
+                            long totalTime = System.currentTimeMillis() - startTime;
+                            logger.success("Ultra kalite screenshot başarıyla gönderildi - Boyut: " + (screenshotData.length / 1024) + " KB, " +
+                                         "Yakalama: " + captureTime + "ms, Transfer: " + transferTime + "ms, Toplam: " + totalTime + "ms");
+                        } catch (Exception ex) {
+                            logger.error("Ultra kalite screenshot gönderim hatası - Kaynak: " + clientIP + " - " + ex.getClass().getSimpleName() + ": " + ex.getMessage(), ex);
                         }
                     } else if (command != null && command.startsWith(AppConstants.COMMAND_SEND_PHOTO_WITH_TIMER)) {
                         // Yeni protokol: SEND_PHOTO_WITH_TIMER:boyut:süre
@@ -258,7 +334,7 @@ public class PhotoViewerServer {
                             logger.warn("Geçersiz veya eksik fotoğraf verisi (Kaynak: " + clientIP + ")");
                             System.out.println("Geçersiz veya eksik fotoğraf verisi. Default gösteriliyor.");
                             if (defaultImage != null) {
-                                photoPanel.setImage(defaultImage);
+                                photoPanel.setImage(defaultImage, true); // Default olarak işaretle
                             } else {
                                 photoPanel.setInfo(AppConstants.INVALID_PHOTO_DATA_MESSAGE);
                             }
@@ -307,17 +383,6 @@ public class PhotoViewerServer {
     }
 
     // Yardımcılar -------------------------------------------------------
-
-    public static File getAppDirectory() {
-        try {
-            Path p = new File(PhotoViewerServer.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toPath();
-            File f = p.toFile();
-            if (f.isFile()) return f.getParentFile();
-            return f;
-        } catch (URISyntaxException e) {
-            return new File(System.getProperty("user.dir"));
-        }
-    }
 
     public static Properties loadProperties(File configFile) {
         synchronized (CONFIG_LOCK) {
@@ -496,4 +561,113 @@ public class PhotoViewerServer {
         return fileChooser;
     }
 
+    // Screenshot alma metodu - Ultra yüksek kalite
+    private static byte[] captureScreenshot() throws Exception {
+        // Ekran görüntüsü al
+        Robot robot = new Robot();
+        Rectangle screenRect = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
+        logger.debug("Ekran boyutu: " + screenRect.width + "x" + screenRect.height);
+        
+        BufferedImage screenshot = robot.createScreenCapture(screenRect);
+        logger.debug("Ham screenshot yakalandı: " + screenshot.getWidth() + "x" + screenshot.getHeight());
+        
+        // İyi kalite ve performans dengesi (1600px max - Full HD+ kalitesi)
+        int maxWidth = 1600; // 1280'den artırıldı, 1920'den az
+        int newWidth = Math.min(screenshot.getWidth(), maxWidth);
+        int newHeight = (screenshot.getHeight() * newWidth) / screenshot.getWidth();
+        
+        logger.debug("Yeniden boyutlandırma (balanced): " + screenshot.getWidth() + "x" + screenshot.getHeight() + 
+                    " -> " + newWidth + "x" + newHeight);
+        
+        // Kalite ve hız dengeli ayarlar
+        BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = resized.createGraphics();
+        
+        // Dengeli kalite ayarları - İyi görüntü ama hızlı
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC); // Kaliteyi geri getir
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY); // Kaliteyi geri getir
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON); // Kenar yumuşatma
+        g.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY); // Renk kalitesi
+        g.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        
+        g.drawImage(screenshot, 0, 0, newWidth, newHeight, null);
+        g.dispose();
+        
+        logger.debug("Görüntü işleme tamamlandı, PNG encoding başlıyor...");
+        
+        // PNG formatında encode et (kayıpsız kalite!)
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        
+        // PNG - Kayıpsız sıkıştırma
+        javax.imageio.ImageWriter writer = javax.imageio.ImageIO.getImageWritersByFormatName("png").next();
+        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+        
+        javax.imageio.stream.ImageOutputStream ios = javax.imageio.ImageIO.createImageOutputStream(baos);
+        writer.setOutput(ios);
+        writer.write(null, new javax.imageio.IIOImage(resized, null, null), param);
+        
+        writer.dispose();
+        ios.close();
+        
+        byte[] result = baos.toByteArray();
+        logger.debug("PNG encoding tamamlandı - Final boyut: " + result.length + " byte (" + (result.length / 1024) + " KB)");
+        
+        return result;
+    }
+
+    // Ultra yüksek kaliteli screenshot (tek görüntü için)
+    private static byte[] captureHighQualityScreenshot() throws Exception {
+        Robot robot = new Robot();
+        Rectangle screenRect = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
+        logger.debug("Ultra kalite ekran boyutu: " + screenRect.width + "x" + screenRect.height);
+        
+        BufferedImage screenshot = robot.createScreenCapture(screenRect);
+        logger.debug("Ultra kalite ham screenshot: " + screenshot.getWidth() + "x" + screenshot.getHeight());
+        
+        // Ultra yüksek çözünürlük (1920px max - 4K destekli)
+        int maxWidth = 1920;
+        int newWidth = Math.min(screenshot.getWidth(), maxWidth);
+        int newHeight = (screenshot.getHeight() * newWidth) / screenshot.getWidth();
+        
+        logger.debug("Ultra kalite boyutlandırma: " + screenshot.getWidth() + "x" + screenshot.getHeight() + 
+                    " -> " + newWidth + "x" + newHeight);
+        
+        // Ultra yüksek kaliteli resize
+        BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = resized.createGraphics();
+        
+        // En iyi kalite ayarları - Ultra mode
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE);
+        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        
+        g.drawImage(screenshot, 0, 0, newWidth, newHeight, null);
+        g.dispose();
+        
+        logger.debug("Ultra kalite görüntü işleme tamamlandı, PNG encoding...");
+        
+        // PNG formatında encode et (kayıpsız kalite!)
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        
+        // PNG - Kayıpsız sıkıştırma
+        javax.imageio.ImageWriter writer = javax.imageio.ImageIO.getImageWritersByFormatName("png").next();
+        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+        
+        javax.imageio.stream.ImageOutputStream ios = javax.imageio.ImageIO.createImageOutputStream(baos);
+        writer.setOutput(ios);
+        writer.write(null, new javax.imageio.IIOImage(resized, null, null), param);
+        
+        writer.dispose();
+        ios.close();
+        
+        byte[] result = baos.toByteArray();
+        logger.debug("Ultra kalite PNG encoding tamamlandı - Final boyut: " + result.length + " byte (" + (result.length / 1024) + " KB)");
+        
+        return result;
+    }
 }

@@ -1,3 +1,8 @@
+/*
+ * Bu yazılım Yusuf Ziyrek'e aittir.
+ * İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.
+ * Tüm hakları saklıdır. © 2025 Yusuf Ziyrek
+ */
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
@@ -33,6 +38,13 @@ public class PhotoPanel extends JPanel {
 
     // Zamanlı gösterim için timer
     private Timer autoReturnTimer;
+    
+    // Uzun süreli zamanlayıcı için (24+ gün)
+    private java.util.concurrent.ScheduledExecutorService longTermExecutor;
+    private java.util.concurrent.ScheduledFuture<?> longTermTask;
+    
+    // Durum takibi - sadece 2 durum: Default veya Toplantı Var
+    private boolean isCustomImageShowing = false;
 
     // Cursor auto-hide
     private Cursor defaultCursor;
@@ -186,6 +198,10 @@ public class PhotoPanel extends JPanel {
         // show info text instead of image
         this.image = null;
         this.info = (info != null) ? info : "";
+        
+        // Default duruma dön - sadece boolean flag
+        isCustomImageShowing = false;
+        
         // ensure cursor visible when showing info
         if (defaultCursor == null) defaultCursor = getCursor();
         setCursor(defaultCursor);
@@ -193,15 +209,37 @@ public class PhotoPanel extends JPanel {
         if (hideCursorTimer != null) hideCursorTimer.stop();
         repaint();
     }
+    
+    // Durum sorgulama metodu - sadece 2 durum
+    public String getCurrentStatus() {
+        return isCustomImageShowing ? "Toplantı Var" : "Default";
+    }
+    
+    // Detaylı durum bilgisi - aynı basit mantık
+    public String getStatusDetails() {
+        return isCustomImageShowing ? "Toplantı Var" : "Default";
+    }
 
     public void setImage(BufferedImage img) {
-        // Önceki zamanlayıcıyı durdur
+        setImage(img, false); // Default olarak özel fotoğraf olarak kabul et
+    }
+    
+    // Durum kontrolü ile fotoğraf gösterimi
+    public void setImage(BufferedImage img, boolean isDefault) {
+        // Önceki zamanlayıcıları durdur
         if (autoReturnTimer != null) {
             autoReturnTimer.stop();
+        }
+        if (longTermTask != null) {
+            longTermTask.cancel(false);
+            longTermTask = null;
         }
         
         this.image = img;
         if (img != null) {
+            // Durum güncelle - basit mantık
+            isCustomImageShowing = !isDefault;
+            
             // when an image is shown, restart hide timer so cursor will auto-hide
             if (defaultCursor == null) defaultCursor = getCursor();
             setCursor(defaultCursor);
@@ -211,6 +249,9 @@ public class PhotoPanel extends JPanel {
             // ensure dark background while showing images (avoids light strips)
             setBackground(AppConstants.IMAGE_BACKGROUND_COLOR);
         } else {
+            // Default duruma dön - sadece boolean flag
+            isCustomImageShowing = false;
+            
             // if clearing the image, stop hide timer and restore info-bg
             if (hideCursorTimer != null) hideCursorTimer.stop();
             setBackground(AppConstants.INFO_BACKGROUND_COLOR);
@@ -236,25 +277,60 @@ public class PhotoPanel extends JPanel {
             // ensure dark background while showing images (avoids light strips)
             setBackground(AppConstants.IMAGE_BACKGROUND_COLOR);
             
-            // Zamanlayıcıyı başlat
+            // Zamanlayıcıyı başlat - uzun süreler için özel işlem
             if (durationSeconds > 0) {
-                // Java Timer maksimum Integer.MAX_VALUE milisaniye destekler
-                // Uzun süreler için özel işlem gerekebilir
-                long millis = Math.min(durationSeconds * 1000L, Integer.MAX_VALUE);
-                autoReturnTimer = new Timer((int) millis, _ -> {
-                    if (defaultImg != null) {
-                        setImage(defaultImg);
-                        System.out.println("Otomatik olarak varsayılan resme döndü.");
-                    } else {
-                        setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
-                        System.out.println("Otomatik olarak bilgi ekranına döndü.");
-                    }
-                });
-                autoReturnTimer.setRepeats(false);
-                autoReturnTimer.start();
+                // Timer limiti: Integer.MAX_VALUE milisaniye (yaklaşık 24.8 gün)
+                final long MAX_TIMER_DAYS = 24;
+                final long MAX_TIMER_SECONDS = MAX_TIMER_DAYS * 24 * 3600;
                 
-                System.out.println("Zamanlayıcı başlatıldı: " + durationSeconds + " saniye (" + 
-                                   (durationSeconds / 86400) + " gün)");
+                if (durationSeconds <= MAX_TIMER_SECONDS) {
+                    // Kısa süre - doğrudan Timer kullan
+                    long millis = durationSeconds * 1000L;
+                    autoReturnTimer = new Timer((int) millis, _ -> {
+                        if (defaultImg != null) {
+                            setImage(defaultImg, true); // Default olarak işaretle
+                            System.out.println("Otomatik olarak varsayılan resme döndü.");
+                        } else {
+                            setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
+                            System.out.println("Otomatik olarak bilgi ekranına döndü.");
+                        }
+                    });
+                    autoReturnTimer.setRepeats(false);
+                    autoReturnTimer.start();
+                    
+                    System.out.println("Kısa süreli zamanlayıcı başlatıldı: " + durationSeconds + " saniye");
+                } else {
+                    // Uzun süre - ScheduledExecutorService kullan
+                    System.out.println("Uzun süreli zamanlayıcı başlatıldı: " + durationSeconds + " saniye (" + 
+                                       (durationSeconds / 86400) + " gün)");
+                    
+                    // Global executor kullan (PhotoPanel dispose'da temizlenecek)
+                    if (longTermExecutor == null) {
+                        longTermExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                            Thread t = new Thread(r, "PhotoPanel-LongTimer");
+                            t.setDaemon(true);
+                            return t;
+                        });
+                    }
+                    
+                    // Mevcut task'ı iptal et
+                    if (longTermTask != null) {
+                        longTermTask.cancel(false);
+                    }
+                    
+                    // Yeni task başlat
+                    longTermTask = longTermExecutor.schedule(() -> {
+                        SwingUtilities.invokeLater(() -> {
+                            if (defaultImg != null) {
+                                setImage(defaultImg, true); // Default olarak işaretle
+                                System.out.println("Uzun süreli zamanlayıcı tamamlandı - varsayılan resme döndü.");
+                            } else {
+                                setInfo(AppConstants.DEFAULT_INFO_MESSAGE);
+                                System.out.println("Uzun süreli zamanlayıcı tamamlandı - bilgi ekranına döndü.");
+                            }
+                        });
+                    }, durationSeconds, java.util.concurrent.TimeUnit.SECONDS);
+                }
             }
         } else {
             // if clearing the image, stop hide timer and restore info-bg
@@ -393,6 +469,24 @@ public class PhotoPanel extends JPanel {
         if (hideCursorTimer != null && hideCursorTimer.isRunning()) {
             hideCursorTimer.stop();
             hideCursorTimer = null;
+        }
+        
+        // Uzun süreli executor'ı temizle
+        if (longTermTask != null) {
+            longTermTask.cancel(true);
+            longTermTask = null;
+        }
+        if (longTermExecutor != null) {
+            longTermExecutor.shutdown();
+            try {
+                if (!longTermExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) {
+                    longTermExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                longTermExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+            longTermExecutor = null;
         }
     }
 }

@@ -1,3 +1,9 @@
+/*
+ * Bu yazılım Yusuf Ziyrek'e aittir.
+ * İzinsiz kopyalanamaz, değiştirilemez, dağıtılamaz ve ticari olarak kullanılamaz.
+ * Tüm hakları saklıdır. © 2025 Yusuf Ziyrek
+ */
+
 /**
  * Ortak hata mesajları ve kullanıcı bildirim mesajları
  * PhotoSender ve PhotoViewer uygulamaları için standart mesajlar

@@ -12,6 +12,7 @@ public class IpList {
     public static class IpEntry {
         private String ip;
         private String name;
+        private String status = "Bilinmiyor";
 
         public IpEntry(String ip, String name) {
             this.ip = ip;
@@ -19,6 +20,8 @@ public class IpList {
         }
         public String getIp() { return ip; }
         public String getName() { return name; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
         public String toString() { return name + " (" + ip + ")"; }
     }
 
@@ -56,6 +59,26 @@ public class IpList {
 
     public List<IpEntry> getIpEntries() {
         return ipEntries;
+    }
+
+    // Belirli bir IP'nin durumunu güncelle
+    public void updateStatus(String ip, String status) {
+        for (IpEntry entry : ipEntries) {
+            if (entry.getIp().equals(ip)) {
+                entry.setStatus(status);
+                break;
+            }
+        }
+    }
+
+    // Tüm IP'lerin durumunu güncelle
+    public void updateAllStatuses(java.util.Map<String, String> statusMap) {
+        for (IpEntry entry : ipEntries) {
+            String status = statusMap.get(entry.getIp());
+            if (status != null) {
+                entry.setStatus(status);
+            }
+        }
     }
 
     // IP formatı kontrolü
